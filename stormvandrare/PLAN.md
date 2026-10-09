@@ -59,10 +59,11 @@ kamera.
       Stormlight som ångar). Humanoida fiender använder samma kropp med
       karapaxplattor, hjälmar och mantlar. `test/hero.js` och `test/enemies.js`
       tar närbilder.
-- [ ] Steg 3: Stormlight, sfärer (laddade och mörka; man drar ljus på avstånd),
-      gemhearts, knobweed, highstorm (varning, stormmur som sveper från öst,
-      vind, lä bakom klippor via raycast österut, bråte, regn, blixtar, laddar
-      sfärer). Den gamla 2D-prototypen i git-historiken (commit `45ac3c3`) har logiken.
+- [x] Steg 3: `js/pickups.js` (sfärer chip/mark/broam med sex ädelstenar, laddade
+      lyser och lyser upp, Stormlight dras på avstånd, mörka laddas av stormen,
+      gemhearts, knobweed, fiender tappar sfärer) och `js/storm.js` (förvarning,
+      stormmur med egen shader, vind, lä via raycast österut, bråte, regn,
+      blixtar, mörkare miljö, gräs drar sig undan). `test/storm.js`.
 - [ ] Steg 4: bossar (chasmfiend som klättrar ur klyftan, Thunderclast,
       Fused-mästare, slutboss), etappmål (gemheart/slutarena), Ideal som låser upp
       Full Lashing (R), spjut (F), Stormlight-rustning och vindkallelse (C).

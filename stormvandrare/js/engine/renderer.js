@@ -263,7 +263,53 @@ void main() {
   o_color = vec4(c, 1.0);
 }`;
 
+// Stormmuren: ett böljande lodrätt plan med animerat brus.
+const VS_STORM = `
+layout(location=0) in vec2 a_uv;
+uniform mat4 u_viewProj;
+uniform vec4 u_wall;   // x, z0, z1, höjd
+uniform float u_time;
+out vec2 v_uv;
+out vec3 v_world;
+void main() {
+  float z = mix(u_wall.y, u_wall.z, a_uv.x);
+  float y = mix(-60.0, u_wall.w, a_uv.y);
+  float bil = sin(z * 0.05 + u_time * 0.9) * 14.0 + sin(z * 0.017 - u_time * 0.5 + y * 0.02) * 22.0 + sin(y * 0.04 + u_time * 1.3) * 8.0;
+  // Muren lutar framåt upptill som en våg.
+  float lean = a_uv.y * a_uv.y * -60.0;
+  vec3 p = vec3(u_wall.x + bil + lean, y, z);
+  v_uv = a_uv;
+  v_world = p;
+  gl_Position = u_viewProj * vec4(p, 1.0);
+}`;
+const FS_STORM = `
+in vec2 v_uv;
+in vec3 v_world;
+uniform float u_time;
+uniform float u_flash;
+out vec4 o_color;
+float h21(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float n2(vec2 p) {
+  vec2 i = floor(p), f = fract(p);
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  return mix(mix(h21(i), h21(i + vec2(1, 0)), u.x), mix(h21(i + vec2(0, 1)), h21(i + vec2(1, 1)), u.x), u.y);
+}
+float fbm(vec2 p) { float s = 0.0, a = 0.5; for (int i = 0; i < 5; i++) { s += a * n2(p); p *= 2.07; a *= 0.5; } return s; }
+void main() {
+  vec2 q = vec2(v_world.z * 0.012, v_world.y * 0.016);
+  float n = fbm(q + vec2(u_time * 0.08, -u_time * 0.25));
+  float n2v = fbm(q * 2.3 + vec2(-u_time * 0.15, -u_time * 0.5));
+  vec3 dark = vec3(0.12, 0.14, 0.18), mid = vec3(0.32, 0.35, 0.4), crem = vec3(0.45, 0.38, 0.3);
+  vec3 c = mix(dark, mid, n);
+  c = mix(c, crem, smoothstep(0.55, 0.9, n2v) * (1.0 - v_uv.y) * 0.8);
+  c += vec3(0.75, 0.8, 1.0) * u_flash * (0.4 + n * 0.8);
+  float a = 0.94 * smoothstep(0.0, 0.08, v_uv.y) * smoothstep(1.0, 0.75, v_uv.y);
+  a *= smoothstep(0.0, 0.04, v_uv.x) * smoothstep(1.0, 0.96, v_uv.x);
+  o_color = vec4(c, a);
+}`;
+
 const Renderer = {
+  stormWall: null,   // { x, z0, z1, h, flash } när highstormen syns
   gl: null,
   w: 1, h: 1,
   hdr: false,
@@ -295,6 +341,20 @@ const Renderer = {
     this.progBright = GL.program(VS_FULL, FS_BRIGHT, '');
     this.progBlur = GL.program(VS_FULL, FS_BLUR, '');
     this.progComp = GL.program(VS_FULL, FS_COMPOSITE, '');
+    this.progStorm = GL.program(VS_STORM, FS_STORM, '');
+    // Rutnät för stormmuren.
+    const sw = 48, sh = 24, grid = [];
+    for (let j = 0; j < sh; j++) for (let i = 0; i < sw; i++) {
+      const u0 = i / sw, u1 = (i + 1) / sw, v0 = j / sh, v1 = (j + 1) / sh;
+      grid.push(u0, v0, u1, v0, u1, v1, u0, v0, u1, v1, u0, v1);
+    }
+    this.stormCount = grid.length / 2;
+    this.stormVao = gl.createVertexArray();
+    gl.bindVertexArray(this.stormVao);
+    GL.buffer(new Float32Array(grid));
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+    gl.bindVertexArray(null);
     this.emptyVao = gl.createVertexArray();
 
     // Skuggkarta.
@@ -662,6 +722,19 @@ const Renderer = {
       for (const it of transparent) this.drawItem(prog, it);
     }
     void u;
+    if (this.stormWall) {
+      const w = this.stormWall;
+      prog = this.progStorm;
+      gl.useProgram(prog.p);
+      gl.uniformMatrix4fv(prog.u.u_viewProj, false, this.cam.viewProj);
+      gl.uniform4f(prog.u.u_wall, w.x, w.z0, w.z1, w.h);
+      gl.uniform1f(prog.u.u_time, this.time);
+      gl.uniform1f(prog.u.u_flash, w.flash);
+      gl.disable(gl.CULL_FACE);
+      gl.bindVertexArray(this.stormVao);
+      gl.drawArrays(gl.TRIANGLES, 0, this.stormCount);
+      gl.enable(gl.CULL_FACE);
+    }
 
     // Band och partiklar.
     this.drawRibbons(false);

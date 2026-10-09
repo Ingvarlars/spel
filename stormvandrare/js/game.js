@@ -85,6 +85,11 @@ const Game = {
     this.stats = { kills: 0, damage: 0, taken: 0, wealth: 0, gemhearts: 0, stormTime: 0 };
     this.mods = { hp: 1 + (level - 1) * 0.25, dmg: 1 + (level - 1) * 0.15, speed: 1 + Math.min(0.25, (level - 1) * 0.05) };
     for (const s of World.spawns) Enemies.spawn(s.type, s.x, s.y, s.z, this.mods, s.elite, s.home);
+    Pickups.reset();
+    for (const s of World.sphereSpots) Pickups.spawnSphere(s.x, s.y, s.z, Math.random() < 0.12 ? 2 : Math.random() < 0.4 ? 1 : 0, !s.dun, false);
+    for (const h of World.herbSpots) Pickups.spawnItem('knobweed', h.x, h.y, h.z, false);
+    Storm.reset(rand(70, 95), 125);
+    this.banner = null;
     const p = this.player;
     p.reset();
     const st = World.start;
@@ -129,7 +134,15 @@ const Game = {
     Blade.update(dt, this);
     Enemies.update(dt, this);
     Projectiles.update(dt, this);
+    Pickups.update(dt, this);
+    Storm.update(dt, this);
+    Storm.affectPlayer(this.player, dt, this);
     Effects.update(dt);
+    if (this.banner && (this.banner.t -= dt) <= 0) this.banner = null;
+  },
+
+  showBanner(text, sub, color, time) {
+    this.banner = { text, sub: sub || '', color: color || '#f3e6c8', t: time || 3.5, max: time || 3.5 };
   },
 
   // Vrider en riktning mot närmaste fiende inom räckvidd och vinkel.
@@ -195,14 +208,17 @@ const Game = {
     return this._aim;
   },
 
-  wind() { return 0; },
+  wind(pos) { return Storm.wind(pos); },
 
   render() {
     const p = this.player;
     const env = this.env;
     env.retract[0] = p.pos[0]; env.retract[1] = p.pos[1]; env.retract[2] = p.pos[2];
+    Storm.applyEnv(env, env.base);
     Renderer.begin(Camera, env, this.realTime);
     World.draw(Camera);
+    Pickups.draw(this);
+    Storm.draw(this);
     Enemies.draw(this);
     Projectiles.draw(this);
     p.draw(this);
@@ -266,6 +282,30 @@ const Game = {
       ctx.fillRect(o[0] - bw / 2, o[1], bw * Math.max(0, e.hp / e.maxHp), 5);
     }
     Effects.drawFloats(ctx, w, h);
+    // Stormvarning och lä.
+    ctx.textAlign = 'left';
+    ctx.font = 'italic 14px Georgia';
+    if (Storm.state === 'warning') {
+      ctx.fillStyle = '#dbe7ff';
+      ctx.fillText('Highstormen om ' + Math.ceil(Storm.timer) + ' s', 20, 72);
+    } else if (Storm.state === 'active') {
+      ctx.fillStyle = p.inShelter ? '#bfe6ff' : '#ffb0a0';
+      ctx.fillText(Storm.contains(p.pos[0]) ? (p.inShelter ? 'I lä – Stormlight fyller dig' : 'Utsatt för stormen!') : 'Highstormen drar fram', 20, 72);
+    }
+    const b = this.banner;
+    if (b) {
+      ctx.globalAlpha = Math.min(1, (b.max - b.t) * 3, b.t * 1.5);
+      ctx.textAlign = 'center';
+      ctx.fillStyle = b.color;
+      ctx.shadowColor = 'rgba(0,0,0,0.6)';
+      ctx.shadowBlur = 8;
+      ctx.font = 'bold ' + Math.round(Math.min(42, w / 14)) + 'px Georgia';
+      ctx.fillText(b.text, w / 2, h * 0.26);
+      ctx.font = 'italic 17px Georgia';
+      ctx.fillText(b.sub, w / 2, h * 0.26 + 34);
+      ctx.shadowBlur = 0;
+      ctx.globalAlpha = 1;
+    }
   },
 
   // --- Händelser (fylls på i senare steg) ---
@@ -330,7 +370,27 @@ const Game = {
     Effects.burst(c[0], c[1], c[2], [0.9, 0.97, 1], 8, 5, 0.3, 0.06);
     Effects.text(c[0], c[1] + e.h * 0.6, c[2], String(Math.round(dmg)), '#fff4d6', 15);
   },
+  onDrawLight(o) { Effects.burst(o.pos[0], o.pos[1], o.pos[2], GEMS[o.gem].c, 6, 1.5, 0.5, 0.05); },
+  onSphereTaken(o) { this.stats.wealth += o.value; },
+  onItem(o) {
+    const p = this.player;
+    const c = p.center(this._c);
+    if (o.kind === 'gemheart') {
+      this.stats.gemhearts++;
+      p.addLight(p.stats.maxLight);
+      Effects.burst(c[0], c[1], c[2], [0.4, 1, 0.65], 40, 6, 1, 0.12);
+      this.showBanner('Gemheart', 'Stormlight fyller dig', '#9dffc8', 2.5);
+    } else if (o.kind === 'knobweed') {
+      p.hp = Math.min(p.stats.maxHp, p.hp + 35);
+      Effects.text(c[0], c[1] + 1, c[2], '+35', '#9be37a', 18);
+    }
+  },
+  onStormWarning() { this.showBanner('Highstormen närmar sig!', 'Sök lä på klippornas västra sida', '#dbe7ff', 4); },
+  onStormStart() { Effects.shake(0.3); },
+  onStormEnd() { this.showBanner('Stormen har passerat', 'Sfärerna glöder igen', '#f3e6c8', 3); },
+  onLightning() { Effects.shake(0.12); },
   onEnemyKilled(e) {
+    Pickups.dropFromEnemy(e);
     const c = Enemies.center(e, this._c);
     Effects.burst(c[0], c[1], c[2], [0.85, 0.95, 1], 26, 6, 0.8, 0.1);
     Effects.debris(c[0], c[1], c[2], e.type === 'brute' ? [0.48, 0.4, 0.34] : [0.3, 0.22, 0.2], e.type === 'brute' ? 26 : 12, 5);
