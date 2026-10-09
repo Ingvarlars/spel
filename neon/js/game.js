@@ -13,6 +13,10 @@ const Game = {
   last: 0,
   fps: 60,
   player: new Player(),
+  weapons: [],
+  vt: { s: 1, tx: 0, ty: 0 }, // aktuell vy-transform
+  stats: null,
+  spawnTimer: 0,
 
   init() {
     this.canvas = document.getElementById('game');
@@ -37,6 +41,12 @@ const Game = {
   newGame() {
     this.time = 0;
     this.player.reset();
+    Enemies.reset();
+    Weapons.reset();
+    this.weapons = [];
+    this.addWeapon('blaster');
+    this.stats = { kills: 0, damage: 0 };
+    this.spawnTimer = 0;
     this.cam.x = this.player.x;
     this.cam.y = this.player.y;
     this.state = 'playing';
@@ -68,6 +78,17 @@ const Game = {
     const p = this.player;
     p.update(dt, this);
 
+    // Tillfällig spawner (ersätts av vågsystemet i levels.js).
+    this.spawnTimer -= dt;
+    if (this.spawnTimer <= 0 && Enemies.list.length < 300) {
+      this.spawnTimer = 0.35;
+      const sp = this.spawnPoint();
+      Enemies.spawn(pick(['chaser', 'chaser', 'dasher', 'shooter', 'tank', 'splitter']), sp.x, sp.y);
+    }
+
+    Enemies.update(dt, this);
+    Weapons.update(dt, this);
+
     // Kameran följer spelaren mjukt och hålls inom banan.
     const k = 1 - Math.exp(-8 * dt);
     this.cam.x += (p.x - this.cam.x) * k;
@@ -83,6 +104,67 @@ const Game = {
     return { x0: this.cam.x - hw, y0: this.cam.y - hh, x1: this.cam.x + hw, y1: this.cam.y + hh };
   },
 
+  // Slumpad punkt strax utanför skärmen men inom banan.
+  spawnPoint() {
+    const p = this.player;
+    const dist = Math.hypot(this.w, this.h) / 2 / this.zoom + 60;
+    const pt = this._sp || (this._sp = { x: 0, y: 0 });
+    for (let tries = 0; tries < 8; tries++) {
+      const a = rand(0, TAU);
+      pt.x = clamp(p.x + Math.cos(a) * dist, 30, WORLD_W - 30);
+      pt.y = clamp(p.y + Math.sin(a) * dist, 30, WORLD_H - 30);
+      if (dist2(pt.x, pt.y, p.x, p.y) > 350 * 350) break;
+    }
+    return pt;
+  },
+
+  addWeapon(id) {
+    for (let i = 0; i < this.weapons.length; i++) {
+      const w = this.weapons[i];
+      if (w.id === id) { w.level = Math.min(w.level + 1, WEAPONS[id].levels.length); return w; }
+    }
+    const w = { id, level: 1, timer: 0.3 };
+    this.weapons.push(w);
+    return w;
+  },
+
+  weaponLevel(id) {
+    for (let i = 0; i < this.weapons.length; i++) if (this.weapons[i].id === id) return this.weapons[i].level;
+    return 0;
+  },
+
+  // All skada på fiender går hit: kritiska träffar, knuff och död.
+  damageEnemy(e, base, fromX, fromY, knock) {
+    if (e.dead) return;
+    const st = this.player.stats;
+    const crit = Math.random() < st.crit;
+    const dmg = base * st.damage * (crit ? 2 : 1);
+    e.hp -= dmg;
+    e.flash = 0.07;
+    this.stats.damage += dmg;
+    if (knock > 0) {
+      const dx = e.x - fromX, dy = e.y - fromY, d = Math.hypot(dx, dy) || 1;
+      const k = knock / e.mass;
+      e.kbx += (dx / d) * k;
+      e.kby += (dy / d) * k;
+    }
+    this.onEnemyHit(e, dmg, crit);
+    if (e.hp <= 0) this.killEnemy(e);
+  },
+
+  killEnemy(e) {
+    e.dead = true;
+    this.stats.kills++;
+    if (e.type === 'splitter' && e.gen > 0) {
+      for (let i = 0; i < 2; i++) {
+        const c = Enemies.spawn('splitter', e.x + rand(-8, 8), e.y + rand(-8, 8), e.mods, e.gen - 1);
+        const a = rand(0, TAU);
+        c.kbx = Math.cos(a) * 220; c.kby = Math.sin(a) * 220;
+      }
+    }
+    this.onEnemyKilled(e);
+  },
+
   render() {
     const ctx = this.ctx;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -90,8 +172,16 @@ const Game = {
     ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
     const s = this.dpr * this.zoom;
-    ctx.setTransform(s, 0, 0, s, this.w * this.dpr / 2 - this.cam.x * s, this.h * this.dpr / 2 - this.cam.y * s);
+    const vt = this.vt;
+    vt.s = s;
+    vt.tx = this.w * this.dpr / 2 - this.cam.x * s;
+    vt.ty = this.h * this.dpr / 2 - this.cam.y * s;
+    ctx.setTransform(s, 0, 0, s, vt.tx, vt.ty);
     this.drawBackground(ctx);
+    Enemies.draw(ctx, this, vt);
+    ctx.globalCompositeOperation = 'lighter';
+    Weapons.draw(ctx, this, vt);
+    ctx.globalCompositeOperation = 'source-over';
     this.player.draw(ctx, this.realTime);
   },
 
@@ -131,6 +221,12 @@ const Game = {
   onShieldBlock() {},
   onPlayerHurt() {},
   onPlayerDeath() {},
+  onShoot() {},
+  onEnemyShoot() {},
+  onEnemyHit() {},
+  onEnemyKilled() {},
+  onExplosion() {},
+  onMissileTrail() {},
 };
 
 window.addEventListener('load', () => Game.init());
