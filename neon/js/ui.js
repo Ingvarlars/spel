@@ -195,7 +195,8 @@ const UI = {
     ctx.shadowBlur = 0;
 
     // Liv.
-    const x0 = 16, y0 = 22, bw = Math.min(220, w * 0.4);
+    const narrow = w < 600;
+    const x0 = 16, y0 = 22, bw = Math.min(220, w / 2 - 60);
     ctx.fillStyle = 'rgba(255,64,96,0.15)';
     ctx.fillRect(x0, y0, bw, 16);
     ctx.fillStyle = '#ff4060';
@@ -236,7 +237,7 @@ const UI = {
     ctx.fillText(formatTime(game.time), w / 2, 30);
     ctx.font = '13px system-ui, sans-serif';
     ctx.fillStyle = '#8aa0c0';
-    ctx.fillText('Nivå ' + game.level + '  ·  Våg ' + game.wave + '  ·  nästa om ' + Math.ceil(Director.timer) + ' s', w / 2, 52);
+    ctx.fillText('Nivå ' + game.level + '  ·  Våg ' + game.wave + '  ·  nästa om ' + Math.ceil(Director.timer) + ' s', w / 2, narrow ? 80 : 52);
 
     if (game.settings.showFps) {
       ctx.textAlign = 'left';
@@ -249,12 +250,12 @@ const UI = {
     ctx.textAlign = 'right';
     ctx.fillStyle = '#e8f6ff';
     ctx.font = 'bold 16px system-ui, sans-serif';
-    ctx.fillText('☠ ' + game.stats.kills, w - 64, 30);
+    ctx.fillText('☠ ' + game.stats.kills, w - 16, 76);
 
     // Bossens livmätare.
     const b = game.boss;
     if (b && !b.dead) {
-      const bw2 = Math.min(520, w * 0.7), bx = (w - bw2) / 2, by = 72;
+      const bw2 = Math.min(520, w * 0.7), bx = (w - bw2) / 2, by = narrow ? 104 : 96;
       ctx.fillStyle = 'rgba(255,32,80,0.15)';
       ctx.fillRect(bx, by, bw2, 12);
       ctx.fillStyle = b.phase ? '#ff7a3f' : '#ff2050';
@@ -323,6 +324,37 @@ const UI = {
       for (let l = 0; l < def.levels.length; l++) {
         ctx.fillStyle = l < ws[i].level ? def.color : 'rgba(255,255,255,0.15)';
         ctx.fillRect(bx + 2 + l * 6, by + 42, 4, 4);
+      }
+    }
+    // Virtuell joystick.
+    const j = Input.joy;
+    if (j.active) {
+      ctx.globalAlpha = 0.5;
+      ctx.strokeStyle = '#3ff6ff';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(j.bx, j.by, JOY_RADIUS, 0, TAU);
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(63,246,255,0.12)';
+      ctx.fill();
+      ctx.globalAlpha = 0.85;
+      ctx.fillStyle = '#3ff6ff';
+      ctx.shadowColor = '#3ff6ff';
+      ctx.shadowBlur = 12;
+      ctx.beginPath();
+      ctx.arc(j.bx + j.dx * JOY_RADIUS, j.by + j.dy * JOY_RADIUS, 22, 0, TAU);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.globalAlpha = 1;
+    }
+
+    // Dash-knappens nedkylning (pekskärm).
+    if (Input.touchMode) {
+      const btn = this.dashBtn || (this.dashBtn = document.getElementById('btn-dash'));
+      const ready = p.dashCd <= 0;
+      if (btn && this.dashReady !== ready) {
+        this.dashReady = ready;
+        btn.classList.toggle('cooling', !ready);
       }
     }
     ctx.textAlign = 'left';

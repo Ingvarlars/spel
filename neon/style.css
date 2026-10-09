@@ -270,3 +270,54 @@ h3 { margin: 18px 0 8px; color: var(--muted); font-weight: 600; letter-spacing: 
   padding: 4px 8px;
 }
 body:not([data-state="playing"]) #btn-pause { display: none; }
+
+/* Pekskärm */
+html, body { overscroll-behavior: none; touch-action: none; }
+#ui { touch-action: pan-y; }
+#btn-dash {
+  display: none;
+  position: fixed;
+  right: calc(22px + env(safe-area-inset-right));
+  bottom: calc(26px + env(safe-area-inset-bottom));
+  width: 86px;
+  height: 86px;
+  z-index: 6;
+  font: 700 0.95rem system-ui, sans-serif;
+  letter-spacing: 0.08em;
+  color: var(--cyan);
+  background: rgba(63, 246, 255, 0.12);
+  border: 2px solid var(--cyan);
+  border-radius: 50%;
+  box-shadow: 0 0 18px rgba(63, 246, 255, 0.5), inset 0 0 14px rgba(63, 246, 255, 0.3);
+  touch-action: none;
+  -webkit-touch-callout: none;
+}
+#btn-dash:active { background: rgba(63, 246, 255, 0.35); }
+#btn-dash.cooling { opacity: 0.35; box-shadow: none; }
+body.touch[data-state="playing"] #btn-dash { display: block; }
+
+@media (max-width: 600px) {
+  .card {
+    flex: 1 1 100%;
+    max-width: 420px;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: 48px 1fr;
+    grid-template-areas: "icon name" "icon desc" "icon tag";
+    align-items: center;
+    justify-items: start;
+    text-align: left;
+    column-gap: 12px;
+    row-gap: 4px;
+    padding: 12px 14px;
+  }
+  .card .icon { grid-area: icon; font-size: 2rem; justify-self: center; }
+  .card .name { grid-area: name; }
+  .card .desc { grid-area: desc; font-size: 0.88rem; }
+  .card .tag { grid-area: tag; }
+  .card .key, .card .kind { display: none; }
+  .cards { gap: 10px; }
+  .sub { margin-bottom: 12px; }
+  .btn { padding: 11px 16px; }
+  .help { font-size: 0.82rem; }
+}
