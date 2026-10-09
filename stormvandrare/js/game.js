@@ -16,6 +16,7 @@ const Game = {
   player: new Player(),
   touchMove: null,
   stormDark: 0,
+  banner: null,
   mods: { hp: 1, dmg: 1, speed: 1 },
   stats: null,
   _mw: { x: 0, y: 0 },
@@ -51,8 +52,14 @@ const Game = {
     Effects.reset();
     Enemies.reset();
     Blade.reset();
+    Pickups.reset();
     Input.clearQueue();
-    this.stats = { kills: 0, damage: 0, taken: 0 };
+    this.banner = null;
+    this.stormDark = 0;
+    this.stats = { kills: 0, damage: 0, taken: 0, wealth: 0, gemhearts: 0, stormTime: 0 };
+    for (const s of World.sphereSpots) Pickups.spawnSphere(s.x, s.y, Math.random() < 0.15 ? 2 : Math.random() < 0.4 ? 1 : 0, !s.dun, false);
+    for (const h of World.herbSpots) { const o = Pickups.spawnItem('knobweed', h.x, h.y); o.settled = true; o.vx = o.vy = 0; }
+    Storm.reset(rand(55, 75), 105);
     this.mods = { hp: 1 + (level - 1) * 0.25, dmg: 1 + (level - 1) * 0.15, speed: 1 + Math.min(0.25, (level - 1) * 0.05) };
     for (const s of World.spawns) Enemies.spawn(s.type, s.x, s.y, this.mods, s.elite);
     this.time = 0;
@@ -97,7 +104,13 @@ const Game = {
     Enemies.update(dt, this);
     Enemies.updateBeams(dt);
     Projectiles.update(dt, this);
+    Pickups.update(dt, this);
+    Storm.update(dt, this);
+    Storm.affectPlayer(p, dt, this);
     World.updateDecor(dt, this);
+    const dark = Storm.warnProgress() * (Storm.contains(this.cam.x) || Storm.state === 'warning' ? 1 : 0.5);
+    this.stormDark += (dark - this.stormDark) * Math.min(1, dt * 1.5);
+    if (this.banner && (this.banner.t -= dt) <= 0) this.banner = null;
     Effects.update(dt);
     this.updateCamera(dt);
   },
@@ -138,8 +151,12 @@ const Game = {
   },
 
   // Vind från urstormen (läggs till i steg 3).
-  wind() { return 0; },
-  inStorm() { return false; },
+  wind(b) { return Storm.wind(b); },
+  inStorm(x) { return Storm.contains(x); },
+
+  showBanner(text, sub, color, time) {
+    this.banner = { text, sub: sub || '', color: color || '#f3e6c8', t: time || 3.5, max: time || 3.5 };
+  },
 
   render() {
     const ctx = this.ctx;
@@ -151,15 +168,18 @@ const Game = {
     ctx.setTransform(s, 0, 0, s, this.w * this.dpr / 2 - cx * s, this.h * this.dpr / 2 - cy * s);
     World.drawTiles(ctx, this);
     World.drawDecor(ctx, this);
+    Pickups.draw(ctx, this);
     Enemies.draw(ctx, this);
     Projectiles.draw(ctx, this);
     this.player.draw(ctx, this);
     Blade.drawInHand(ctx, this);
     Blade.draw(ctx, this);
     Effects.draw(ctx, this);
+    Storm.drawWorld(ctx, this);
     Effects.drawTexts(ctx);
 
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    Storm.drawOverlay(ctx, this);
     this.drawDebugHud(ctx);
   },
 
@@ -171,6 +191,21 @@ const Game = {
     ctx.fillRect(14, 14, 212 * p.hp / p.stats.maxHp, 12);
     ctx.fillStyle = '#dff3ff';
     ctx.fillRect(14, 32, 212 * p.light / p.stats.maxLight, 12);
+    ctx.fillStyle = '#fff';
+    ctx.font = '12px Georgia';
+    ctx.textAlign = 'left';
+    ctx.fillText(Storm.state + ' ' + Math.ceil(Storm.timer) + (p.inShelter ? ' lä' : ''), 14, 64);
+    const b = this.banner;
+    if (b) {
+      ctx.globalAlpha = Math.min(1, (b.max - b.t) * 3, b.t * 1.5);
+      ctx.textAlign = 'center';
+      ctx.fillStyle = b.color;
+      ctx.font = 'bold 34px Georgia';
+      ctx.fillText(b.text, this.w / 2, this.h * 0.28);
+      ctx.font = 'italic 16px Georgia';
+      ctx.fillText(b.sub, this.w / 2, this.h * 0.28 + 30);
+      ctx.globalAlpha = 1;
+    }
   },
 
   // Hjälper siktet mot en fiende i ungefär rätt riktning.
@@ -239,7 +274,26 @@ const Game = {
     Effects.sparks(e.x, e.y, rand(0, TAU), Math.PI, '#e8f6ff', 5, 220);
     Effects.text(e.x, e.y - e.h / 2 - 6, String(Math.round(dmg)), '#fff4d6', 14);
   },
+  onDrawLight(o) { Effects.burst(o.x, o.y, GEMS[o.gem].color, 5, 60, 0.4, 2); },
+  onSphereTaken(o) { this.stats.wealth += o.value; },
+  onItem(o) {
+    const p = this.player;
+    if (o.kind === 'gemheart') {
+      this.stats.gemhearts++;
+      p.addLight(p.stats.maxLight);
+      Effects.burst(o.x, o.y, '#7dffb5', 30, 260, 0.9, 3);
+      this.showBanner('Gemheart', 'Stormlight fyller dig', '#9dffc8', 2.5);
+    } else if (o.kind === 'knobweed') {
+      p.hp = Math.min(p.stats.maxHp, p.hp + 35);
+      Effects.text(p.x, p.y - 30, '+35', '#9be37a', 16);
+    }
+  },
+  onStormWarning() { this.showBanner('Highstormen närmar sig!', 'Sök lä på klippornas västra sida', '#dbe7ff', 4); },
+  onStormStart() { Effects.shake(0.3); },
+  onStormEnd() { this.showBanner('Stormen har passerat', 'Sfärerna glöder igen', '#f3e6c8', 3); },
+  onLightning() { Effects.shake(0.15); },
   onEnemyKilled(e) {
+    Pickups.dropFromEnemy(e);
     Effects.burst(e.x, e.y, 'rgba(230,245,255,0.9)', 16, 220, 0.6, 3);
     Effects.debris(e.x, e.y, e.type === 'brute' ? '#7a6656' : '#6d5c55', e.type === 'brute' ? 24 : 10, 220);
   },

@@ -20,6 +20,7 @@ const World = {
   chunks: new Map(),
   spawns: [],       // fiender: { type, x, y }
   sphereSpots: [],  // sfärer: { x, y, dun }
+  herbSpots: [],    // knobweed
   decor: [],        // rockbuds och gräs
   plateaus: [],     // { x0, x1, top } i rutor
   arena: null,      // slutarenan { x0, x1, top }
@@ -53,6 +54,7 @@ const World = {
     this.chunks.clear();
     this.spawns = [];
     this.sphereSpots = [];
+    this.herbSpots = [];
     this.decor = [];
     this.plateaus = [];
 
@@ -149,6 +151,10 @@ const World = {
       if (type === 'crab') {
         for (let c = 0; c < ri(1, 3); c++) this.spawns.push({ type, x: (tx + c + 1) * TILE, y: sy - 20 });
       }
+    }
+    if (rng() < 0.25) {
+      const tx = ri(plat.x0 + 1, plat.x1 - 1);
+      this.herbSpots.push({ x: (tx + 0.5) * TILE, y: this.surfaceRow(tx) * TILE });
     }
     for (let k = 0; k < ri(1, 3); k++) {
       const tx = ri(plat.x0 + 1, plat.x1 - 1);
