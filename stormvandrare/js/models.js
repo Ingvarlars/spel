@@ -134,3 +134,88 @@ const Rig = {
     return hand;
   },
 };
+
+// --- Fiendernas färger ---
+const PAL = {
+  warrior: { skin: col('#3a2a2c'), pants: col('#4a2c22'), boots: col('#2a1d18'), belt: col('#6a3a24'), body: col('#3a2a2c'), sleeve: col('#3a2a2c'), plate: col('#a8452a'), helmet: col('#b5522f'), eye: col('#2a1a10') },
+  archer: { skin: col('#3d2b2b'), pants: col('#5a3a26'), boots: col('#2a1d18'), belt: col('#6a4a2c'), body: col('#5d4a3a'), sleeve: col('#3d2b2b'), plate: col('#c46a3a'), helmet: col('#c46a3a'), eye: col('#2a1a10') },
+  shield: { skin: col('#33262a'), pants: col('#3b2a22'), boots: col('#221812'), belt: col('#5a3424'), body: col('#33262a'), sleeve: col('#33262a'), plate: col('#8e3a24'), helmet: col('#8e3a24'), eye: col('#2a1a10') },
+  thunder: { skin: col('#2a1e24'), pants: col('#2a1a20'), boots: col('#1a1214'), belt: col('#5a1a24'), body: col('#2a1e24'), sleeve: col('#2a1e24'), plate: col('#5a1f2a'), robe: col('#3a1420'), eye: col('#ff3a5a', 2.5) },
+  hover: { skin: col('#3c2c30'), pants: col('#6a2a2a'), boots: col('#2a1d18'), belt: col('#c9a046'), body: col('#7a2e2a'), sleeve: col('#7a2e2a'), plate: col('#8a5a3a'), robe: col('#7a2e2a'), mask: col('#d8c7a8'), eye: col('#ff5a3a', 1.5) },
+};
+
+Object.assign(Models, {
+  axe() {
+    return this.cache.axe || (this.cache.axe = new MeshBuilder()
+      .box(0, 0, 0.4, 0.05, 0.05, 1.0, col('#5a3d26'))
+      .box(0, 0.12, 0.82, 0.04, 0.32, 0.22, col('#9aa4ab'))
+      .box(0, -0.12, 0.82, 0.04, 0.32, 0.22, col('#9aa4ab')).build());
+  },
+  bow() {
+    if (this.cache.bow) return this.cache.bow;
+    const mb = new MeshBuilder();
+    const wood = col('#5a3d26');
+    for (let i = 0; i < 6; i++) {
+      const a0 = -1 + i / 3, a1 = -1 + (i + 1) / 3;
+      const p0 = [0, Math.sin(a0) * 0.7, Math.cos(a0) * 0.25], p1 = [0, Math.sin(a1) * 0.7, Math.cos(a1) * 0.25];
+      mb.box((p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2, (p0[2] + p1[2]) / 2, 0.04, Math.abs(p1[1] - p0[1]) + 0.04, 0.05, wood);
+    }
+    mb.box(0, 0, 0.13, 0.01, 1.3, 0.01, col('#e8e0d0'));
+    return (this.cache.bow = mb.build());
+  },
+  shieldMesh() {
+    return this.cache.shield || (this.cache.shield = new MeshBuilder()
+      .box(0, 0, 0, 0.75, 1.5, 0.12, col('#7a5a3a'), col('#7a5a3a'))
+      .box(0, 0, 0.07, 0.62, 1.3, 0.04, col('#9a3a24'))
+      .box(0, 0, 0.1, 0.12, 1.1, 0.04, col('#c9a046')).build());
+  },
+  // Spjut längs +z med spetsen framåt.
+  spear() {
+    if (this.cache.spear) return this.cache.spear;
+    const mb = new MeshBuilder();
+    mb.box(0, 0, 0.6, 0.05, 0.05, 2.4, col('#5a3d26'));
+    mb.transform(M4.fromTRS(M4.create(), 0, 0, 1.8, 0, Math.PI / 2, 0, 1, 1, 1));
+    mb.cyl(0, 0, 0, 0.08, 0, 0.35, 4, col('#c0c8d0'), null);
+    mb.transform(null);
+    return (this.cache.spear = mb.build());
+  },
+  crab() {
+    if (this.cache.crab) return this.cache.crab;
+    const mb = new MeshBuilder();
+    const shell = col('#8c7a68'), dark = col('#5e4f42');
+    mb.sphere(0, 0.18, 0, 0.36, 7, shell, 0.55);
+    for (let i = 0; i < 3; i++) for (const s of [-1, 1]) mb.box(s * 0.35, 0.08, -0.15 + i * 0.15, 0.3, 0.05, 0.05, dark);
+    mb.box(0.12, 0.32, 0.3, 0.04, 0.16, 0.04, dark); mb.box(-0.12, 0.32, 0.3, 0.04, 0.16, 0.04, dark);
+    mb.box(0.12, 0.42, 0.3, 0.06, 0.06, 0.06, col('#ffb347', 1.2)); mb.box(-0.12, 0.42, 0.3, 0.06, 0.06, 0.06, col('#ffb347', 1.2));
+    mb.box(0.22, 0.15, 0.42, 0.14, 0.1, 0.18, dark); mb.box(-0.22, 0.15, 0.42, 0.14, 0.1, 0.18, dark);
+    return (this.cache.crab = mb.build());
+  },
+  voidspren() {
+    if (this.cache.void) return this.cache.void;
+    const mb = new MeshBuilder();
+    mb.sphere(0, 0, 0, 0.45, 8, col('#1a0f22'));
+    mb.sphere(0, 0, 0.18, 0.22, 6, col('#b45cff', 2.2));
+    for (let k = 0; k < 6; k++) {
+      const a = (k / 6) * TAU;
+      mb.transform(M4.fromTRS(M4.create(), Math.cos(a) * 0.3, Math.sin(a) * 0.3, -0.1, a, 1.2, 0, 1, 1, 1));
+      mb.cyl(0, 0, 0, 0.08, 0.0, 0.8, 4, col('#2a1238'), null);
+    }
+    mb.transform(null);
+    return (this.cache.void = mb.build());
+  },
+  brute() {
+    if (this.cache.brute) return this.cache.brute;
+    const parts = {};
+    const rock = col('#7a6656'), dark = col('#544538'), crack = col('#ffb347', 2.2);
+    let mb = new MeshBuilder();
+    mb.box(0, 1.4, 0, 1.5, 1.3, 1.0, rock);
+    mb.box(0, 2.2, 0.15, 0.7, 0.55, 0.6, dark);
+    mb.box(0.15, 2.25, 0.46, 0.14, 0.08, 0.04, crack); mb.box(-0.15, 2.25, 0.46, 0.14, 0.08, 0.04, crack);
+    mb.box(0.3, 1.5, 0.51, 0.08, 0.6, 0.02, crack); mb.box(-0.2, 1.2, 0.51, 0.5, 0.06, 0.02, crack);
+    mb.box(0, 0.75, 0, 1.1, 0.4, 0.8, dark);
+    parts.body = mb.build();
+    mb = new MeshBuilder(); mb.box(0, -0.6, 0, 0.5, 1.3, 0.5, dark); mb.box(0, -1.3, 0.1, 0.62, 0.4, 0.6, rock); parts.arm = mb.build();
+    mb = new MeshBuilder(); mb.box(0, -0.4, 0, 0.5, 0.8, 0.55, dark); parts.leg = mb.build();
+    return (this.cache.brute = parts);
+  },
+});

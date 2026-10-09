@@ -329,11 +329,14 @@ class Player {
     pose.wantHand = this._hand || (this._hand = M4.create());
     const tint = this.hurtFlash > 0 ? { tint: [1, 0.3, 0.3, 0.5] } : this.invuln > 0 && Math.floor(game.realTime * 20) % 2 ? { tint: [0.8, 0.9, 1, 0.4] } : null;
     const hand = Rig.draw(rig, root, pose, tint);
-    // Shardblade i handen vid hugg.
+    // Shardblade i handen vid hugg (den framkallas ur dimma och försvinner igen).
     if (this.attackAnim > 0 || this.bladeOut > 0) {
       const L = M4.fromTRS(this._m2 || (this._m2 = M4.create()), 0, -0.68, 0.02, 0, 0, 0, 1, 1, 1);
       const out = M4.multiply(this._m3 || (this._m3 = M4.create()), hand, L);
       Renderer.draw(Models.shardblade(), out, { emissive: 0.15 });
+      if (this.attackAnim > 0) Blade.recordTip(hand);
     }
+    this.bladeOut = Math.max(0, (this.bladeOut || 0) - 0.016);
+    if (this.attackAnim > 0) this.bladeOut = 0.5;
   }
 }

@@ -518,7 +518,7 @@ const THEMES = {
     floor: col('#4c5a3a'), floorAlt: col('#5e6b40'),
     grass: col('#5f8a3a'), grassTip: col('#9fbf55'), bud: col('#7d6a58'), vine: col('#5c8a3a'),
     wood: col('#8a6a45'), woodDark: col('#5a4128'),
-    sky: { top: [0.32, 0.55, 0.85], horizon: [0.86, 0.85, 0.78], ground: [0.55, 0.45, 0.38], sun: [1.6, 1.4, 1.1], cloud: [0.95, 0.94, 0.92] },
-    ambientSky: [0.42, 0.48, 0.58], ambientGround: [0.36, 0.26, 0.2], fog: 0.0042, sunDir: [-0.45, 0.62, 0.35],
+    sky: { top: [0.32, 0.55, 0.85], horizon: [0.86, 0.85, 0.78], ground: [0.55, 0.45, 0.38], sun: [1.25, 1.1, 0.9], cloud: [0.95, 0.94, 0.92] },
+    ambientSky: [0.4, 0.45, 0.55], ambientGround: [0.32, 0.24, 0.19], fog: 0.0042, sunDir: [-0.45, 0.62, 0.35],
   },
 };
