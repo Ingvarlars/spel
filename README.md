@@ -49,3 +49,58 @@ dyr `shadowBlur` varje bildruta.
 **Byggordning:** (1) rörelse och kamera, (2) fiender och skott, (3) XP och
 uppgraderingar, (4) vågor och boss, (5) effekter och ljud, (6) menyer och sparning,
 (7) mobilstöd.
+
+### Så spelar du
+
+Styr farkosten och överlev så länge som möjligt. Farkosten **skjuter automatiskt**
+mot närmaste fiende – du fokuserar på att röra dig, undvika skott och välja
+uppgraderingar.
+
+| Handling | Dator | Mobil |
+| --- | --- | --- |
+| Styr | WASD eller piltangenter | Sätt tummen var som helst och dra (virtuell joystick) |
+| Dash (kort rusning, osårbar, nedkylning) | Mellanslag eller Shift | DASH-knappen nere till höger |
+| Välj uppgradering | Klicka eller tangent 1 / 2 / 3 | Tryck på kortet |
+| Paus | Esc eller P | ⏸-knappen |
+| Ljud av/på | M eller 🔊-knappen | 🔊-knappen |
+
+- **Vågor:** en ny våg börjar var 30:e sekund. Fienderna blir fler, tåligare och
+  snabbare, och nya typer dyker upp.
+- **Boss:** var 5:e våg kommer *Kärnan* med spiralskott, ringsalvor, rusningar och
+  förstärkningar. Under halva livet går den in i raseri. En pil visar var den är.
+- **XP och nivåer:** döda fiender tappar XP-kristaller (blå = 1, gröna = 5,
+  rosa = 25). Vid ny nivå pausas spelet och du väljer 1 av 3 slumpade
+  uppgraderingar. Ibland tappas ett hjärta (läker) eller en magnet (drar till sig
+  all XP).
+
+#### Fiender
+
+| Fiende | Beteende |
+| --- | --- |
+| Jägare (rosa romb) | Jagar dig rakt |
+| Rusare (gul pil) | Stannar, siktar (gul linje) och rusar sedan blixtsnabbt |
+| Skytt (grön femhörning) | Håller avstånd och skjuter |
+| Pansar (orange sexhörning) | Långsam men tål mycket och gör stor skada |
+| Delare (lila cirkel) | Delar sig i två mindre när den dör – två gånger |
+
+#### Vapen (max 5 samtidigt, 6 nivåer var)
+
+| Vapen | Funktion |
+| --- | --- |
+| Pulsblaster | Startvapnet. Skjuter mot närmaste fiende |
+| Kretsande blad | Energiblad som kretsar runt farkosten |
+| Målsökande raketer | Söker upp fiender och exploderar med områdesskada |
+| Blixtkedja | Blixt som hoppar mellan flera fiender |
+| Novapuls | Chockvåg som skadar och knuffar bort fiender |
+
+**Förmågor:** fler skott, snabbare eldtakt, genomträngande skott, sköld,
+livsregenerering, XP-magnet, mer skada, mer max-liv, fart, kritiska träffar,
+större område och pansar.
+
+#### Menyer och sparning
+
+Startmenyn, pausmenyn och game over-skärmen (tid överlevd, fiender dödade, nivå,
+våg, bossar och skada) nås med mus, tangentbord eller touch. I inställningarna kan
+du ändra ljud, volym, skärmskakning, skadesiffror, mängd partiklar och visa FPS.
+Rekord, total statistik och inställningar sparas i webbläsarens `localStorage`.
+Om lagringen är avstängd fungerar spelet ändå, men inget sparas.
