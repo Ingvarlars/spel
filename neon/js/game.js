@@ -16,7 +16,9 @@ const Game = {
   weapons: [],
   vt: { s: 1, tx: 0, ty: 0 }, // aktuell vy-transform
   stats: null,
-  spawnTimer: 0,
+  waveMods: null,
+  boss: null,
+  banner: null,
   level: 1,
   xp: 0,
   xpNext: 5,
@@ -63,7 +65,10 @@ const Game = {
     this.weapons = [];
     this.addWeapon('blaster');
     this.stats = { kills: 0, damage: 0 };
-    this.spawnTimer = 0;
+    this.boss = null;
+    this.banner = null;
+    this.wave = 0;
+    Director.reset();
     this.cam.x = this.player.x;
     this.cam.y = this.player.y;
     this.state = 'playing';
@@ -95,14 +100,11 @@ const Game = {
     const p = this.player;
     p.update(dt, this);
 
-    // Tillfällig spawner (ersätts av vågsystemet i levels.js).
-    this.spawnTimer -= dt;
-    if (this.spawnTimer <= 0 && Enemies.list.length < 300) {
-      this.spawnTimer = 0.35;
-      const sp = this.spawnPoint();
-      Enemies.spawn(pick(['chaser', 'chaser', 'dasher', 'shooter', 'tank', 'splitter']), sp.x, sp.y);
+    Director.update(dt, this);
+    if (this.banner) {
+      this.banner.t -= dt;
+      if (this.banner.t <= 0) this.banner = null;
     }
-
     Enemies.update(dt, this);
     Weapons.update(dt, this);
     Pickups.update(dt, this);
@@ -174,6 +176,7 @@ const Game = {
   killEnemy(e) {
     e.dead = true;
     this.stats.kills++;
+    if (e.isBoss) this.onBossKilled(e);
     if (e.type === 'splitter' && e.gen > 0) {
       for (let i = 0; i < 2; i++) {
         const c = Enemies.spawn('splitter', e.x + rand(-8, 8), e.y + rand(-8, 8), e.mods, e.gen - 1);
@@ -219,6 +222,28 @@ const Game = {
     const r = Math.random();
     if (r < 0.006) Pickups.spawn('heart', e.x, e.y);
     else if (r < 0.009) Pickups.spawn('magnet', e.x, e.y);
+  },
+
+  showBanner(text, sub, color) {
+    this.banner = { text, sub, color: color || '#3ff6ff', t: 3, max: 3 };
+  },
+
+  onWaveStart(w) {
+    this.showBanner('VÅG ' + w, w === 1 ? 'Överlev!' : 'Fienderna blir starkare', '#3ff6ff');
+  },
+
+  onBossSpawn(b) {
+    this.boss = b;
+    this.showBanner('VÅG ' + this.wave + ' – BOSS', 'Kärnan nivå ' + b.level + ' närmar sig!', '#ff2050');
+  },
+
+  onBossKilled(b) {
+    this.boss = null;
+    this.stats.bosses = (this.stats.bosses || 0) + 1;
+    Pickups.dropXp(b.x, b.y, 60 + 40 * b.level);
+    Pickups.spawn('heart', b.x + 20, b.y);
+    Pickups.spawn('magnet', b.x - 20, b.y);
+    this.showBanner('BOSS BESEGRAD', '+' + (60 + 40 * b.level) + ' XP', '#ffe23f');
   },
 
   onPickup(o) {
@@ -289,6 +314,9 @@ const Game = {
   onEnemyShoot() {},
   onEnemyHit() {},
   onLevelUp() {},
+  onBossRage() {},
+  onBossCharge() {},
+  onBossSummon() {},
   onExplosion() {},
   onMissileTrail() {},
 };

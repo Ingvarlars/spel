@@ -105,13 +105,65 @@ const UI = {
     ctx.fillText(formatTime(game.time), w / 2, 30);
     ctx.font = '13px system-ui, sans-serif';
     ctx.fillStyle = '#8aa0c0';
-    ctx.fillText('Nivå ' + game.level + (game.wave ? '  ·  Våg ' + game.wave : ''), w / 2, 52);
+    ctx.fillText('Nivå ' + game.level + '  ·  Våg ' + game.wave + '  ·  nästa om ' + Math.ceil(Director.timer) + ' s', w / 2, 52);
 
     // Dödade fiender till höger.
     ctx.textAlign = 'right';
     ctx.fillStyle = '#e8f6ff';
     ctx.font = 'bold 16px system-ui, sans-serif';
     ctx.fillText('☠ ' + game.stats.kills, w - 64, 30);
+
+    // Bossens livmätare.
+    const b = game.boss;
+    if (b && !b.dead) {
+      const bw2 = Math.min(520, w * 0.7), bx = (w - bw2) / 2, by = 72;
+      ctx.fillStyle = 'rgba(255,32,80,0.15)';
+      ctx.fillRect(bx, by, bw2, 12);
+      ctx.fillStyle = b.phase ? '#ff7a3f' : '#ff2050';
+      ctx.shadowColor = ctx.fillStyle;
+      ctx.shadowBlur = 12;
+      ctx.fillRect(bx, by, bw2 * clamp(b.hp / b.maxHp, 0, 1), 12);
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+      ctx.strokeRect(bx + 0.5, by + 0.5, bw2 - 1, 11);
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 12px system-ui, sans-serif';
+      ctx.fillText('KÄRNAN · NIVÅ ' + b.level + (b.phase ? ' · RASERI' : ''), w / 2, by + 24);
+      // Pil mot bossen om den är utanför skärmen.
+      const sx = (b.x - game.cam.x) * game.zoom + w / 2, sy = (b.y - game.cam.y) * game.zoom + h / 2;
+      if (sx < 0 || sx > w || sy < 0 || sy > h) {
+        const a = Math.atan2(sy - h / 2, sx - w / 2);
+        const ex = clamp(w / 2 + Math.cos(a) * w, 30, w - 30), ey = clamp(h / 2 + Math.sin(a) * h, 100, h - 30);
+        ctx.save();
+        ctx.translate(ex, ey);
+        ctx.rotate(a);
+        ctx.fillStyle = '#ff2050';
+        ctx.beginPath();
+        ctx.moveTo(14, 0); ctx.lineTo(-8, 9); ctx.lineTo(-8, -9);
+        ctx.fill();
+        ctx.restore();
+      }
+    }
+
+    // Banner för ny våg / boss.
+    const bn = game.banner;
+    if (bn) {
+      const t = bn.max - bn.t;
+      const alpha = Math.min(1, t * 3, bn.t * 1.5);
+      ctx.globalAlpha = alpha;
+      ctx.textAlign = 'center';
+      ctx.fillStyle = bn.color;
+      ctx.shadowColor = bn.color;
+      ctx.shadowBlur = 20;
+      ctx.font = 'bold ' + Math.round(Math.min(56, w / 10)) + 'px system-ui, sans-serif';
+      ctx.fillText(bn.text, w / 2, h * 0.3);
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = '#e8f6ff';
+      ctx.font = '16px system-ui, sans-serif';
+      ctx.fillText(bn.sub, w / 2, h * 0.3 + 40);
+      ctx.globalAlpha = 1;
+    }
 
     // Vapen nere till vänster.
     ctx.textAlign = 'center';

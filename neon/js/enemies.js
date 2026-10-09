@@ -300,6 +300,8 @@ const Enemies = {
     }
     ctx.setTransform(s, 0, 0, s, vt.tx, vt.ty);
 
+    if (game.boss && !game.boss.dead) Boss.drawTelegraph(game.boss, ctx);
+
     // Rusarens siktlinje under uppladdning.
     ctx.lineWidth = 2;
     for (let i = 0; i < a.length; i++) {
@@ -333,11 +335,147 @@ const Enemies = {
   },
 };
 
-// Bossen fylls på i steg 4.
+// Bossen: växlar mellan attackmönster och blir argare under halva livet.
+// Mönster: 0 = spiral, 1 = ringsalvor, 2 = rusning, 3 = kallar på hjälp.
 const Boss = {
-  update(e, dt, game, nx, ny) {
-    e.vx = nx * e.speed;
-    e.vy = ny * e.speed;
-    e.angle += dt * 0.5;
+  init(e, n) {
+    e.level = n;
+    e.maxHp = e.hp = 1800 * (1 + 1.2 * (n - 1));
+    e.dmg = 25 + 5 * n;
+    e.speed = 70 + 6 * n;
+    e.pattern = -1;
+    e.state = 0;
+    e.patternTimer = 1.5;
+    e.shotTimer = 0;
+    e.phase = 0;
+  },
+
+  nextPattern(e) {
+    let p;
+    do { p = randInt(0, 3); } while (p === e.pattern);
+    e.pattern = p;
+    e.state = 0;
+    e.shotTimer = 0;
+    e.patternTimer = p === 0 ? 4 : p === 1 ? 2.4 : p === 2 ? 0 : 1.2;
+    e.charges = 2 + (e.phase ? 1 : 0);
+  },
+
+  update(e, dt, game, nx, ny, d) {
+    const rage = e.hp < e.maxHp * 0.5;
+    if (rage && !e.phase) { e.phase = 1; game.onBossRage(e); }
+    const n = e.level, speedUp = rage ? 1.35 : 1;
+    e.patternTimer -= dt;
+    e.shotTimer -= dt;
+    const k = 1 - Math.exp(-4 * dt);
+
+    if (e.pattern === -1) { // paus mellan mönster: närma sig spelaren
+      e.vx += (nx * e.speed - e.vx) * k;
+      e.vy += (ny * e.speed - e.vy) * k;
+      e.angle += dt * 0.6;
+      if (e.patternTimer <= 0) this.nextPattern(e);
+      return;
+    }
+
+    switch (e.pattern) {
+      case 0: // spiral av skott medan den sakta följer efter
+        e.vx += (nx * e.speed * 0.4 - e.vx) * k;
+        e.vy += (ny * e.speed * 0.4 - e.vy) * k;
+        e.angle += dt * 2.2 * speedUp;
+        if (e.shotTimer <= 0) {
+          e.shotTimer = 0.09 / speedUp;
+          const arms = 2 + Math.min(3, n) + (rage ? 1 : 0);
+          for (let i = 0; i < arms; i++) {
+            Enemies.fireBullet(e.x, e.y, e.angle + (i / arms) * TAU, 200 + 15 * n, e.dmg * 0.5, '#ff3f5a', 7);
+          }
+          game.onEnemyShoot(e, true);
+        }
+        break;
+
+      case 1: // ringar av skott
+        e.vx *= 0.9; e.vy *= 0.9;
+        e.angle += dt;
+        if (e.shotTimer <= 0) {
+          e.shotTimer = 0.6 / speedUp;
+          const count = 16 + 4 * n + (rage ? 6 : 0);
+          const off = e.state * 0.5;
+          for (let i = 0; i < count; i++) {
+            Enemies.fireBullet(e.x, e.y, off + (i / count) * TAU, 170 + 10 * n, e.dmg * 0.5, '#ff7a3f', 8);
+          }
+          e.state++;
+          game.onEnemyShoot(e, true);
+        }
+        break;
+
+      case 2: // laddar och rusar mot spelaren, flera gånger
+        if (e.state === 0) { // sikta
+          e.vx *= 0.85; e.vy *= 0.85;
+          e.dirX = nx; e.dirY = ny;
+          e.state = 1;
+          e.timer = 0.8 / speedUp;
+        } else if (e.state === 1) {
+          e.vx *= 0.85; e.vy *= 0.85;
+          e.dirX = nx; e.dirY = ny;
+          e.timer -= dt;
+          if (e.timer <= 0) { e.state = 2; e.timer = 0.65; game.onBossCharge(e); }
+        } else if (e.state === 2) {
+          const sp = 640 + 40 * n;
+          e.vx = e.dirX * sp; e.vy = e.dirY * sp;
+          e.angle += dt * 8;
+          e.timer -= dt;
+          if (e.timer <= 0) {
+            e.charges--;
+            // Skott åt sidorna när rusningen slutar.
+            const a = Math.atan2(e.dirY, e.dirX);
+            for (let i = 0; i < 10; i++) Enemies.fireBullet(e.x, e.y, a + (i / 10) * TAU, 180, e.dmg * 0.5, '#ff3f5a', 7);
+            e.state = e.charges > 0 ? 0 : 3;
+            e.timer = 0.5;
+          }
+        } else {
+          e.vx *= 0.9; e.vy *= 0.9;
+          e.timer -= dt;
+          if (e.timer <= 0) e.patternTimer = 0;
+        }
+        if (e.state !== 3) e.patternTimer = 1;
+        break;
+
+      case 3: // kallar på hjälp och skjuter riktade salvor
+        e.vx *= 0.9; e.vy *= 0.9;
+        e.angle += dt * 0.5;
+        if (e.state === 0) {
+          e.state = 1;
+          const count = 5 + 2 * n;
+          for (let i = 0; i < count; i++) {
+            const a = (i / count) * TAU;
+            Enemies.spawn(n >= 2 && i % 3 === 0 ? 'dasher' : 'chaser', e.x + Math.cos(a) * (e.r + 30), e.y + Math.sin(a) * (e.r + 30), game.waveMods);
+          }
+          game.onBossSummon(e);
+        }
+        if (e.shotTimer <= 0) {
+          e.shotTimer = 0.35 / speedUp;
+          const a = Math.atan2(ny, nx);
+          for (let i = -2; i <= 2; i++) Enemies.fireBullet(e.x + nx * e.r, e.y + ny * e.r, a + i * 0.14, 300, e.dmg * 0.5, '#ff3f5a', 7);
+          game.onEnemyShoot(e, true);
+        }
+        break;
+    }
+
+    if (e.patternTimer <= 0) {
+      e.pattern = -1;
+      e.patternTimer = rage ? 0.6 : 1.1;
+    }
+  },
+
+  // Siktlinje före rusning.
+  drawTelegraph(e, ctx) {
+    if (e.pattern !== 2 || e.state !== 1) return;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255, 32, 80, 0.55)';
+    ctx.lineWidth = e.r * 1.6;
+    ctx.globalAlpha = 0.25 + 0.3 * Math.sin(e.timer * 30) ** 2;
+    ctx.beginPath();
+    ctx.moveTo(e.x, e.y);
+    ctx.lineTo(e.x + e.dirX * 700, e.y + e.dirY * 700);
+    ctx.stroke();
+    ctx.restore();
   },
 };
