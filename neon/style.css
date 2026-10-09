@@ -1,0 +1,31 @@
+:root {
+  --bg: #05060d;
+  --panel: rgba(10, 12, 28, 0.88);
+  --text: #e8f6ff;
+  --muted: #8aa0c0;
+  --cyan: #3ff6ff;
+  --pink: #ff3fa4;
+  --yellow: #ffe23f;
+  --green: #3fff8a;
+  --purple: #b04bff;
+}
+* { box-sizing: border-box; }
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+canvas#game {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
+}
