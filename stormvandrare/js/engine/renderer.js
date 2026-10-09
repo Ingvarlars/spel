@@ -350,7 +350,7 @@ const Renderer = {
     this.ribCountAlpha = 0;
     this.ribAlphaStart = this.ribMax / 2;
 
-    for (let i = 0; i < 4096; i++) this.items.push({ mesh: null, model: M4.create(), tint: new Float32Array(4), emissive: 0, alpha: 1, shadow: true });
+    for (let i = 0; i < 4096; i++) this.items.push({ mesh: null, model: M4.create(), tint: new Float32Array(4), emissive: 0, alpha: 1, shadow: true, noCull: false });
     this.lightPosArr = new Float32Array(MAX_LIGHTS * 4);
     this.lightColArr = new Float32Array(MAX_LIGHTS * 3);
     return true;
@@ -435,7 +435,9 @@ const Renderer = {
     it.emissive = 0;
     it.alpha = 1;
     it.shadow = true;
+    it.noCull = false;
     if (opts) {
+      if (opts.noCull) it.noCull = true;
       if (opts.tint) it.tint.set(opts.tint);
       if (opts.emissive) it.emissive = opts.emissive;
       if (opts.alpha !== undefined) it.alpha = opts.alpha;
@@ -583,7 +585,9 @@ const Renderer = {
       if (!it.shadow || it.alpha < 1) continue;
       gl.uniformMatrix4fv(prog.u.u_model, false, it.model);
       gl.bindVertexArray(it.mesh.vao);
+      if (it.noCull) gl.disable(gl.CULL_FACE);
       gl.drawArrays(gl.TRIANGLES, 0, it.mesh.count);
+      if (it.noCull) gl.enable(gl.CULL_FACE);
     }
     prog = this.progShadowInst;
     gl.useProgram(prog.p);
@@ -728,7 +732,9 @@ const Renderer = {
     gl.uniform1f(u.u_emissive, it.emissive);
     gl.uniform1f(u.u_alpha, it.alpha);
     gl.bindVertexArray(it.mesh.vao);
+    if (it.noCull) gl.disable(gl.CULL_FACE);
     gl.drawArrays(gl.TRIANGLES, 0, it.mesh.count);
+    if (it.noCull) gl.enable(gl.CULL_FACE);
   },
 
   drawParticles(additive) {

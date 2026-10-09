@@ -111,6 +111,24 @@ class Mesh {
   }
 }
 
+// Mesh vars hörn skrivs om varje bildruta (t.ex. tyg).
+class DynamicMesh extends Mesh {
+  constructor(maxVerts) {
+    super(new Float32Array(maxVerts * VERT_FLOATS), 0);
+    this.max = maxVerts;
+    this.radius = 100;
+    const gl = GL.gl;
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.vbo);
+    gl.bufferData(gl.ARRAY_BUFFER, maxVerts * VERT_FLOATS * 4, gl.DYNAMIC_DRAW);
+  }
+  update(data, verts) {
+    const gl = GL.gl;
+    this.count = Math.min(verts, this.max);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.vbo);
+    gl.bufferSubData(gl.ARRAY_BUFFER, 0, data, 0, this.count * VERT_FLOATS);
+  }
+}
+
 // Bygger platt skuggade lågpolygonsmodeller med vertexfärger.
 class MeshBuilder {
   constructor() {
@@ -186,6 +204,100 @@ class MeshBuilder {
         if (j === 0) this.tri(a[0], a[1], a[2], c[0], c[1], c[2], d[0], d[1], d[2], col);
         else if (j === rings - 1) this.tri(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2], col);
         else this.quad(a, b, c, d, col);
+      }
+    }
+    return this;
+  }
+
+  // Vertex med egen normal (för mjukt skuggade former).
+  vert(x, y, z, nx, ny, nz, c) {
+    if (this.m) {
+      const t = MeshBuilder._p, m = this.m;
+      M4.transformPoint(t, m, [x, y, z]); x = t[0]; y = t[1]; z = t[2];
+      const ax = m[0] * nx + m[4] * ny + m[8] * nz, ay = m[1] * nx + m[5] * ny + m[9] * nz, az = m[2] * nx + m[6] * ny + m[10] * nz;
+      const l = Math.hypot(ax, ay, az) || 1;
+      nx = ax / l; ny = ay / l; nz = az / l;
+    }
+    this.data.push(x, y, z, nx, ny, nz, c[0], c[1], c[2], c[3] || 0);
+  }
+
+  // Loft: ringar längs y med elliptiskt tvärsnitt och jämna normaler.
+  // rings: [{ y, rx, rz, x?, z?, c }], seg = antal hörn per ring.
+  loft(rings, seg, capBottom, capTop) {
+    const n = rings.length;
+    const P = [];
+    for (let i = 0; i < n; i++) {
+      const r = rings[i], row = [];
+      for (let j = 0; j < seg; j++) {
+        const a = (j / seg) * TAU;
+        row.push([(r.x || 0) + Math.sin(a) * r.rx, r.y, (r.z || 0) + Math.cos(a) * r.rz]);
+      }
+      P.push(row);
+    }
+    const N = [];
+    for (let i = 0; i < n; i++) {
+      const row = [];
+      for (let j = 0; j < seg; j++) {
+        // Längs: närmaste grannringar med verklig längd.
+        let a = P[Math.min(n - 1, i + 1)][j], b = P[Math.max(0, i - 1)][j];
+        if (Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) < 1e-4) { a = P[Math.min(n - 1, i + 2)][j]; b = P[Math.max(0, i - 2)][j]; }
+        const ux = a[0] - b[0], uy = a[1] - b[1], uz = a[2] - b[2];
+        const c = P[i][(j + 1) % seg], d = P[i][(j + seg - 1) % seg];
+        const vx = c[0] - d[0], vy = c[1] - d[1], vz = c[2] - d[2];
+        let nx = vy * uz - vz * uy, ny = vz * ux - vx * uz, nz = vx * uy - vy * ux;
+        const r = rings[i];
+        const ox = P[i][j][0] - (r.x || 0), oz = P[i][j][2] - (r.z || 0);
+        if (nx * ox + nz * oz < 0) { nx = -nx; ny = -ny; nz = -nz; }
+        const l = Math.hypot(nx, ny, nz) || 1;
+        row.push([nx / l, ny / l, nz / l]);
+      }
+      N.push(row);
+    }
+    for (let i = 0; i < n - 1; i++) {
+      const c = rings[i + 1].c || rings[i].c;
+      for (let j = 0; j < seg; j++) {
+        const j2 = (j + 1) % seg;
+        const a = P[i][j], b = P[i][j2], cc = P[i + 1][j2], d = P[i + 1][j];
+        const na = N[i][j], nb = N[i][j2], nc = N[i + 1][j2], nd = N[i + 1][j];
+        // Moturs sett utifrån.
+        this.vert(a[0], a[1], a[2], na[0], na[1], na[2], c);
+        this.vert(b[0], b[1], b[2], nb[0], nb[1], nb[2], c);
+        this.vert(cc[0], cc[1], cc[2], nc[0], nc[1], nc[2], c);
+        this.vert(a[0], a[1], a[2], na[0], na[1], na[2], c);
+        this.vert(cc[0], cc[1], cc[2], nc[0], nc[1], nc[2], c);
+        this.vert(d[0], d[1], d[2], nd[0], nd[1], nd[2], c);
+      }
+    }
+    const cap = (i, down) => {
+      const r = rings[i], c = r.c;
+      const cx = r.x || 0, cz = r.z || 0;
+      for (let j = 0; j < seg; j++) {
+        const a = P[i][j], b = P[i][(j + 1) % seg];
+        if (down) { this.vert(cx, r.y, cz, 0, -1, 0, c); this.vert(b[0], b[1], b[2], 0, -1, 0, c); this.vert(a[0], a[1], a[2], 0, -1, 0, c); }
+        else { this.vert(cx, r.y, cz, 0, 1, 0, c); this.vert(a[0], a[1], a[2], 0, 1, 0, c); this.vert(b[0], b[1], b[2], 0, 1, 0, c); }
+      }
+    };
+    if (capBottom) cap(0, true);
+    if (capTop) cap(n - 1, false);
+    return this;
+  }
+
+  // Mjukt skuggad ellipsoid.
+  ellipsoid(cx, cy, cz, rx, ry, rz, seg, rings, c) {
+    const P = (t, a) => {
+      const st = Math.sin(t), ct = Math.cos(t), sa = Math.sin(a), ca = Math.cos(a);
+      const x = st * sa, y = ct, z = st * ca;
+      const nx = x / rx, ny = y / ry, nz = z / rz, l = Math.hypot(nx, ny, nz) || 1;
+      return [cx + x * rx, cy + y * ry, cz + z * rz, nx / l, ny / l, nz / l];
+    };
+    for (let i = 0; i < rings; i++) {
+      const t0 = (i / rings) * Math.PI, t1 = ((i + 1) / rings) * Math.PI;
+      for (let j = 0; j < seg; j++) {
+        const a0 = (j / seg) * TAU, a1 = ((j + 1) / seg) * TAU;
+        const p00 = P(t0, a0), p01 = P(t0, a1), p10 = P(t1, a0), p11 = P(t1, a1);
+        const v = (p) => this.vert(p[0], p[1], p[2], p[3], p[4], p[5], c);
+        if (i > 0) { v(p00); v(p11); v(p01); }
+        if (i < rings - 1) { v(p00); v(p10); v(p11); }
       }
     }
     return this;
