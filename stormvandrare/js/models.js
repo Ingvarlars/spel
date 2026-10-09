@@ -5,71 +5,6 @@
 const Models = {
   cache: {},
 
-  // Humanoid. pal: färger (col()-arrayer). opts: proportioner och tillbehör.
-  humanoid(key, pal, opts) {
-    if (this.cache[key]) return this.cache[key];
-    opts = opts || {};
-    const s = opts.scale || 1;
-    const bulk = opts.bulk || 1;
-    const parts = {};
-    // Ben: pivot i höften, pekar nedåt.
-    for (const side of [-1, 1]) {
-      const mb = new MeshBuilder();
-      mb.box(0, -0.25, 0, 0.17 * bulk, 0.5, 0.18 * bulk, pal.pants);
-      mb.box(0, -0.68, 0, 0.15 * bulk, 0.4, 0.16 * bulk, pal.pants);
-      mb.box(0, -0.9, 0.05, 0.17 * bulk, 0.12, 0.28, pal.boots);
-      parts[side < 0 ? 'legL' : 'legR'] = mb.build();
-    }
-    // Bål: pivot i höften.
-    {
-      const mb = new MeshBuilder();
-      mb.box(0, 0.08, 0, 0.36 * bulk, 0.18, 0.22 * bulk, pal.belt || pal.pants);
-      mb.box(0, 0.36, 0, 0.42 * bulk, 0.42, 0.24 * bulk, pal.body);
-      if (pal.plate) {
-        mb.box(0, 0.4, 0.08 * bulk, 0.36 * bulk, 0.3, 0.12, pal.plate);
-        mb.box(-0.26 * bulk, 0.55, 0, 0.16, 0.12, 0.26 * bulk, pal.plate);
-        mb.box(0.26 * bulk, 0.55, 0, 0.16, 0.12, 0.26 * bulk, pal.plate);
-      }
-      if (pal.trim) mb.box(0, 0.36, 0.125 * bulk, 0.06, 0.4, 0.02, pal.trim);
-      if (opts.coat) {
-        // Rockskört bak.
-        mb.quad([-0.2, 0.15, -0.12], [0.2, 0.15, -0.12], [0.24, -0.45, -0.24], [-0.24, -0.45, -0.24], pal.coat || pal.body);
-        mb.quad([0.2, 0.15, -0.12], [-0.2, 0.15, -0.12], [-0.24, -0.45, -0.24], [0.24, -0.45, -0.24], pal.coat || pal.body);
-      }
-      if (opts.robe) mb.cyl(0, -0.85, 0, 0.36, 0.22, 1.0, 8, pal.robe, null);
-      parts.torso = mb.build();
-    }
-    // Huvud: pivot i nacken.
-    {
-      const mb = new MeshBuilder();
-      mb.box(0, 0.04, 0, 0.1, 0.08, 0.1, pal.skin);
-      mb.sphere(0, 0.17, 0.01, 0.13, 7, pal.skin, 1.1);
-      if (pal.hair) { mb.sphere(0, 0.22, -0.02, 0.135, 7, pal.hair, 0.75); }
-      if (pal.helmet) {
-        mb.sphere(0, 0.2, -0.01, 0.145, 7, pal.helmet, 0.8);
-        mb.box(0, 0.33, -0.02, 0.05, 0.12, 0.28, pal.helmet);
-      }
-      if (pal.mask) mb.box(0, 0.17, 0.12, 0.2, 0.08, 0.04, pal.mask);
-      if (pal.eye) {
-        mb.box(-0.045, 0.18, 0.125, 0.035, 0.025, 0.02, pal.eye);
-        mb.box(0.045, 0.18, 0.125, 0.035, 0.025, 0.02, pal.eye);
-      }
-      parts.head = mb.build();
-    }
-    // Armar: pivot i axeln, pekar nedåt.
-    for (const side of [-1, 1]) {
-      const mb = new MeshBuilder();
-      mb.box(0, -0.18, 0, 0.13 * bulk, 0.36, 0.13 * bulk, pal.sleeve || pal.body);
-      mb.box(0, -0.48, 0, 0.11 * bulk, 0.3, 0.11 * bulk, pal.sleeve || pal.body);
-      mb.box(0, -0.66, 0, 0.1, 0.1, 0.1, pal.skin);
-      if (pal.plate) mb.box(0, -0.42, 0, 0.14 * bulk, 0.16, 0.14 * bulk, pal.plate);
-      parts[side < 0 ? 'armL' : 'armR'] = mb.build();
-    }
-    const rig = { parts, scale: s, bulk, hip: 0.95, shoulderY: 0.55, shoulderX: 0.26 * bulk, neck: 0.6 };
-    this.cache[key] = rig;
-    return rig;
-  },
-
   // Shardblade: lång, smal klinga med vågig egg och glödande linjer.
   shardblade() {
     if (this.cache.blade) return this.cache.blade;
@@ -94,54 +29,6 @@ const Models = {
     this.cache.blade = mb.build();
     return this.cache.blade;
   },
-};
-
-// Sätter ihop en humanoid. root = modellmatris för höften (y=0 vid fötterna).
-// pose: { legL, legR, armL, armR (framåtsving), armLr, armRr (utåt), lean, head, crouch }
-const Rig = {
-  _root: M4.create(),
-  _loc: M4.create(),
-  _out: M4.create(),
-
-  draw(rig, root, pose, opts) {
-    const s = rig.scale;
-    const L = this._loc, O = this._out;
-    const hipY = rig.hip * s - (pose.crouch || 0);
-    // Bål (lutning framåt).
-    M4.fromTRS(L, 0, hipY, 0, pose.twist || 0, pose.lean || 0, pose.roll || 0, s, s, s);
-    M4.multiply(O, root, L);
-    const torso = M4.copy(this._root, O);
-    Renderer.draw(rig.parts.torso, O, opts);
-    // Huvud.
-    M4.fromTRS(L, 0, rig.neck, 0, pose.head || 0, pose.headPitch || 0, 0, 1, 1, 1);
-    M4.multiply(O, torso, L);
-    Renderer.draw(rig.parts.head, O, opts);
-    // Armar.
-    // Modellen tittar mot +z, så vänster sida ligger på +x.
-    M4.fromTRS(L, rig.shoulderX, rig.shoulderY, 0, 0, -(pose.armL || 0), pose.armLr || 0, 1, 1, 1);
-    M4.multiply(O, torso, L);
-    Renderer.draw(rig.parts.armL, O, opts);
-    M4.fromTRS(L, -rig.shoulderX, rig.shoulderY, 0, pose.armRy || 0, -(pose.armR || 0), -(pose.armRr || 0), 1, 1, 1);
-    M4.multiply(O, torso, L);
-    Renderer.draw(rig.parts.armR, O, opts);
-    const hand = pose.wantHand ? M4.copy(pose.wantHand, O) : null;
-    // Ben (sitter i höften men följer inte bålens lutning).
-    for (const side of [-1, 1]) {
-      M4.fromTRS(L, -side * 0.1 * rig.bulk * s, hipY, 0, 0, -(side < 0 ? pose.legL || 0 : pose.legR || 0), 0, s, s, s);
-      M4.multiply(O, root, L);
-      Renderer.draw(side < 0 ? rig.parts.legL : rig.parts.legR, O, opts);
-    }
-    return hand;
-  },
-};
-
-// --- Fiendernas färger ---
-const PAL = {
-  warrior: { skin: col('#3a2a2c'), pants: col('#4a2c22'), boots: col('#2a1d18'), belt: col('#6a3a24'), body: col('#3a2a2c'), sleeve: col('#3a2a2c'), plate: col('#a8452a'), helmet: col('#b5522f'), eye: col('#2a1a10') },
-  archer: { skin: col('#3d2b2b'), pants: col('#5a3a26'), boots: col('#2a1d18'), belt: col('#6a4a2c'), body: col('#5d4a3a'), sleeve: col('#3d2b2b'), plate: col('#c46a3a'), helmet: col('#c46a3a'), eye: col('#2a1a10') },
-  shield: { skin: col('#33262a'), pants: col('#3b2a22'), boots: col('#221812'), belt: col('#5a3424'), body: col('#33262a'), sleeve: col('#33262a'), plate: col('#8e3a24'), helmet: col('#8e3a24'), eye: col('#2a1a10') },
-  thunder: { skin: col('#2a1e24'), pants: col('#2a1a20'), boots: col('#1a1214'), belt: col('#5a1a24'), body: col('#2a1e24'), sleeve: col('#2a1e24'), plate: col('#5a1f2a'), robe: col('#3a1420'), eye: col('#ff3a5a', 2.5) },
-  hover: { skin: col('#3c2c30'), pants: col('#6a2a2a'), boots: col('#2a1d18'), belt: col('#c9a046'), body: col('#7a2e2a'), sleeve: col('#7a2e2a'), plate: col('#8a5a3a'), robe: col('#7a2e2a'), mask: col('#d8c7a8'), eye: col('#ff5a3a', 1.5) },
 };
 
 Object.assign(Models, {
@@ -182,12 +69,20 @@ Object.assign(Models, {
   crab() {
     if (this.cache.crab) return this.cache.crab;
     const mb = new MeshBuilder();
-    const shell = col('#8c7a68'), dark = col('#5e4f42');
-    mb.sphere(0, 0.18, 0, 0.36, 7, shell, 0.55);
-    for (let i = 0; i < 3; i++) for (const s of [-1, 1]) mb.box(s * 0.35, 0.08, -0.15 + i * 0.15, 0.3, 0.05, 0.05, dark);
-    mb.box(0.12, 0.32, 0.3, 0.04, 0.16, 0.04, dark); mb.box(-0.12, 0.32, 0.3, 0.04, 0.16, 0.04, dark);
-    mb.box(0.12, 0.42, 0.3, 0.06, 0.06, 0.06, col('#ffb347', 1.2)); mb.box(-0.12, 0.42, 0.3, 0.06, 0.06, 0.06, col('#ffb347', 1.2));
-    mb.box(0.22, 0.15, 0.42, 0.14, 0.1, 0.18, dark); mb.box(-0.22, 0.15, 0.42, 0.14, 0.1, 0.18, dark);
+    const shell = col('#8c7a68'), dark = col('#5e4f42'), belly = col('#b9a58a');
+    mb.ellipsoid(0, 0.2, 0, 0.36, 0.17, 0.42, 10, 6, shell);
+    mb.ellipsoid(0, 0.13, 0.02, 0.3, 0.08, 0.36, 8, 4, belly);
+    for (let k = -1; k <= 1; k++) mb.ellipsoid(0, 0.33, k * 0.13, 0.25, 0.04, 0.05, 6, 3, dark);
+    for (let i = 0; i < 3; i++) for (const s of [-1, 1]) {
+      mb.transform(M4.fromTRS(M4.create(), s * 0.3, 0.12, -0.18 + i * 0.17, 0, 0, s * 0.9, 1, 1, 1));
+      mb.ellipsoid(0, -0.12, 0, 0.03, 0.14, 0.03, 5, 3, dark);
+    }
+    mb.transform(null);
+    for (const s of [-1, 1]) {
+      mb.ellipsoid(s * 0.12, 0.38, 0.32, 0.025, 0.08, 0.025, 5, 3, dark);
+      mb.ellipsoid(s * 0.12, 0.47, 0.33, 0.04, 0.04, 0.04, 6, 4, col('#ffb347', 1.4));
+      mb.ellipsoid(s * 0.24, 0.15, 0.46, 0.09, 0.06, 0.12, 6, 4, dark);
+    }
     return (this.cache.crab = mb.build());
   },
   voidspren() {
@@ -206,16 +101,31 @@ Object.assign(Models, {
   brute() {
     if (this.cache.brute) return this.cache.brute;
     const parts = {};
-    const rock = col('#7a6656'), dark = col('#544538'), crack = col('#ffb347', 2.2);
+    const rock = col('#7a6656'), dark = col('#5a4a3e'), crack = col('#ffb347', 2.4);
     let mb = new MeshBuilder();
-    mb.box(0, 1.4, 0, 1.5, 1.3, 1.0, rock);
-    mb.box(0, 2.2, 0.15, 0.7, 0.55, 0.6, dark);
-    mb.box(0.15, 2.25, 0.46, 0.14, 0.08, 0.04, crack); mb.box(-0.15, 2.25, 0.46, 0.14, 0.08, 0.04, crack);
-    mb.box(0.3, 1.5, 0.51, 0.08, 0.6, 0.02, crack); mb.box(-0.2, 1.2, 0.51, 0.5, 0.06, 0.02, crack);
-    mb.box(0, 0.75, 0, 1.1, 0.4, 0.8, dark);
+    mb.ellipsoid(0, 1.45, 0, 0.8, 0.65, 0.55, 10, 7, rock);
+    mb.ellipsoid(0.35, 1.75, -0.1, 0.45, 0.4, 0.4, 8, 5, dark);
+    mb.ellipsoid(-0.4, 1.7, -0.05, 0.42, 0.42, 0.4, 8, 5, dark);
+    mb.ellipsoid(0, 2.2, 0.2, 0.32, 0.28, 0.3, 8, 6, rock);
+    mb.ellipsoid(0.12, 2.24, 0.47, 0.06, 0.035, 0.03, 6, 3, crack);
+    mb.ellipsoid(-0.12, 2.24, 0.47, 0.06, 0.035, 0.03, 6, 3, crack);
+    mb.ellipsoid(0, 0.85, 0, 0.55, 0.3, 0.4, 8, 5, dark);
+    // Glödande sprickor över bröstet.
+    const cr = [[0.2, 1.5, 0.52, 0.03, 0.3, 0.6], [-0.15, 1.3, 0.53, 0.25, 0.03, -0.3], [0.05, 1.7, 0.5, 0.18, 0.025, 0.4]];
+    for (const c of cr) {
+      mb.transform(M4.fromTRS(M4.create(), c[0], c[1], c[2], 0, 0, c[5], 1, 1, 1));
+      mb.ellipsoid(0, 0, 0, Math.max(c[3], 0.03), Math.max(c[4], 0.03), 0.02, 6, 3, crack);
+    }
+    mb.transform(null);
     parts.body = mb.build();
-    mb = new MeshBuilder(); mb.box(0, -0.6, 0, 0.5, 1.3, 0.5, dark); mb.box(0, -1.3, 0.1, 0.62, 0.4, 0.6, rock); parts.arm = mb.build();
-    mb = new MeshBuilder(); mb.box(0, -0.4, 0, 0.5, 0.8, 0.55, dark); parts.leg = mb.build();
+    mb = new MeshBuilder();
+    mb.ellipsoid(0, -0.35, 0, 0.3, 0.42, 0.3, 8, 5, dark);
+    mb.ellipsoid(0, -1.0, 0.05, 0.27, 0.4, 0.27, 8, 5, rock);
+    mb.ellipsoid(0, -1.45, 0.1, 0.36, 0.26, 0.34, 8, 5, dark);
+    parts.arm = mb.build();
+    mb = new MeshBuilder();
+    mb.ellipsoid(0, -0.38, 0, 0.3, 0.42, 0.32, 8, 5, dark);
+    parts.leg = mb.build();
     return (this.cache.brute = parts);
   },
 });

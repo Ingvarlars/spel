@@ -35,7 +35,7 @@ ett steg.
 | `js/input.js` | Tangentbord, mus med pekarlås, handlingar som köas |
 | `js/world.js` | Platåer som extruderade polygoner (prismor), spiror, block som kan skäras, broar, klyftbotten, kollision mellan sfärer och prismor, raycast, meshar och dekor, teman (`THEMES`) |
 | `js/camera.js` | Tredjepersonskamera vars upp-riktning följer spelarens gravitation |
-| `js/models.js` | Äldre enkla riggar, vapen, kremling, voidspren, stenbjässe och paletter (`PAL`) |
+| `js/models.js` | Vapen, Shardblade, kremling, voidspren och stenbjässe |
 | `js/character.js` | Ny kroppsbyggare (`Body`), skelett (`Skeleton`), poser (`makePose`, `Anim`) och tyg (`Cloth`) |
 | `js/effects.js` | Partiklar, skärmskakning, flytande text |
 | `js/player.js` | Windrunnern: rörelse relativt egen gravitation, Lashings, rusning, Stormlight, läkning |
@@ -52,14 +52,13 @@ kamera.
 
 - [x] 3D steg 1: motor, värld, rörelse, Lashings, kamera
 - [x] 3D steg 2: Shardblade och åtta fiendetyper
-- [ ] **Pågår:** karaktärsombyggnad. `js/character.js` är skriven men inte
-      inkopplad. Kvar: rita spelaren med `Body.build('hero', ...)` och
-      `Skeleton.draw`, animera (gång/löpning, tomgång, hopp, flygning i
-      "superman"-pose längs farten, landning, tre olika hugg), rocken som `Cloth`
-      fäst i bäckenet (gravitation = spelarens `g`, vind, kollisionssfärer på ben
-      och bäcken), Shardblade i `handR`, ögon som lyser med Stormlight, dimma när
-      klingan framkallas. Byt sedan humanoida fiender till nya kroppen (med
-      `plates`/`helmet`/`robe`).
+- [x] Karaktärsombyggnad: `js/character.js` (mjuk kropp med fullt skelett,
+      ansikte, hår, uniform med guldkanter och glyf, tygsimulerad rock som följer
+      gravitation och fartvind, animationer för tomgång, gång/löpning, hopp, fall,
+      flygning längs farten, landning, rusning och tre hugg, lysande ögon och
+      Stormlight som ångar). Humanoida fiender använder samma kropp med
+      karapaxplattor, hjälmar och mantlar. `test/hero.js` och `test/enemies.js`
+      tar närbilder.
 - [ ] Steg 3: Stormlight, sfärer (laddade och mörka; man drar ljus på avstånd),
       gemhearts, knobweed, highstorm (varning, stormmur som sveper från öst,
       vind, lä bakom klippor via raycast österut, bråte, regn, blixtar, laddar

@@ -2,6 +2,23 @@
 // Fiender i 3D: beteenden, fysik, projektiler (pilar, bråte), chockvågor och
 // röda blixtar. Bossar sköts av bosses.js men använder samma lista.
 
+// Färger och kroppsval för de humanoida fienderna (Parshendi har karapaxpansar
+// som växer ur huden; stormformen har glödande röda ögon).
+const ENEMY_PAL = {
+  warrior: { skin: col('#3a2a2c'), pants: col('#4a2c22'), boots: col('#2a1d18'), belt: col('#6a3a24'), body: col('#3a2a2c'), sleeve: col('#3a2a2c'), plate: col('#a8452a'), helmet: col('#b5522f'), eye: col('#2a1a10'), cuff: col('#a8452a') },
+  archer: { skin: col('#3d2b2b'), pants: col('#5a3a26'), boots: col('#2a1d18'), belt: col('#6a4a2c'), body: col('#5d4a3a'), sleeve: col('#3d2b2b'), plate: col('#c46a3a'), helmet: col('#c46a3a'), eye: col('#2a1a10'), cuff: col('#5d4a3a') },
+  shield: { skin: col('#33262a'), pants: col('#3b2a22'), boots: col('#221812'), belt: col('#5a3424'), body: col('#33262a'), sleeve: col('#33262a'), plate: col('#8e3a24'), helmet: col('#8e3a24'), eye: col('#2a1a10'), cuff: col('#8e3a24') },
+  thunder: { skin: col('#2a1e24'), pants: col('#2a1a20'), boots: col('#1a1214'), belt: col('#5a1a24'), body: col('#2a1e24'), sleeve: col('#2a1e24'), plate: col('#5a1f2a'), helmet: col('#4a1822'), robe: col('#3a1420'), eye: col('#ff3a5a', 3), cuff: col('#5a1f2a') },
+  hover: { skin: col('#3c2c30'), pants: col('#6a2a2a'), boots: col('#2a1d18'), belt: col('#c9a046'), body: col('#7a2e2a'), sleeve: col('#7a2e2a'), plate: col('#8a5a3a'), helmet: col('#5a3a2a'), robe: col('#7a2e2a'), mask: col('#d8c7a8'), eye: col('#ff5a3a', 2), cuff: col('#c9a046') },
+};
+const ENEMY_BODY = {
+  warrior: { plates: true, helmet: true, bulk: 1.12 },
+  archer: { plates: true, helmet: true, bulk: 1.0 },
+  shield: { plates: true, helmet: true, bulk: 1.3 },
+  thunder: { plates: true, helmet: true, robe: true, bulk: 1.05 },
+  hover: { plates: true, helmet: true, robe: true, bulk: 1.0 },
+};
+
 const ENEMY_DEFS = {
   crab:    { name: 'Kremling',              hp: 16,  r: 0.38, h: 0.6, speed: 4.2, dmg: 7,  weight: 0.5, contact: true,  glow: 1 },
   warrior: { name: 'Parshendi-krigare',     hp: 60,  r: 0.42, h: 1.9, speed: 5.4, dmg: 18, weight: 1.2, contact: false, glow: 3 },
@@ -578,61 +595,74 @@ const Enemies = {
         case 'warrior':
         case 'shield':
         case 'archer':
-        case 'thunder': {
-          const rig = Models.humanoid(e.type, PAL[e.type], { bulk: e.type === 'shield' ? 1.25 : 1.1, robe: e.type === 'thunder' });
+        case 'thunder':
+        case 'hover': {
+          const body = Body.build('e-' + e.type, ENEMY_PAL[e.type], ENEMY_BODY[e.type]);
+          const P = e.pose || (e.pose = makePose());
+          const T = this._T || (this._T = makePose());
+          const base = this._B || (this._B = makePose());
+          for (const k in T) T[k] = base[k];
+          if (e.type === 'hover') {
+            // Svävar med hängande ben; dyker med spjutet före.
+            T.hipLP = 0.25; T.hipRP = 0.1; T.knL = 0.5; T.knR = 0.7; T.anL = -0.5; T.anR = -0.5;
+            T.shLR = 0.6; T.elL = 0.4;
+            T.shRP = e.state === 1 || e.state === 2 ? 1.6 : 0.5; T.elR = 0.2;
+            T.spineP = e.state === 2 ? 0.9 : 0.15;
+          } else if (moving > 0.3 && e.grounded) {
+            e.walkPhase = (e.walkPhase || 0) + moving * 0.016 * 1.3;
+            Anim.locomotion(T, e.walkPhase, Math.min(1, moving / 3), clamp((moving - 3) / 3, 0, 1));
+          } else Anim.idle(T, t + e.id);
           if (e.type === 'warrior') {
-            if (e.state === 1) { const k = 1 - e.timer / 0.45; pose.armR = 2.6 * k; pose.lean = -0.2 * k; }
-            else if (e.state === 2) { pose.armR = 0.3; pose.lean = 0.35; }
-            else pose.armR = 0.4 + run * 0.3;
-          } else if (e.type === 'archer') {
-            if (e.state === 1) { pose.armL = 1.5; pose.armR = 1.5; pose.armRr = 0.3 + (1 - e.timer / 0.85) * 0.4; }
+            if (e.state === 1) { const k = 1 - e.timer / 0.45; T.shRP = 2.7 * k; T.elR = 0.6 * k; T.spineP = -0.2 * k; T.spineY = -0.3 * k; }
+            else if (e.state === 2) { T.shRP = 0.4; T.elR = 0.1; T.spineP = 0.45; T.spineY = 0.3; T.knL += 0.4; }
+            else T.shRP = Math.max(T.shRP, 0.3);
+          } else if (e.type === 'archer' && e.state === 1) {
+            const k = 1 - e.timer / 0.85;
+            T.shLP = 1.55; T.elL = 0.05; T.shRP = 1.5; T.shRY = 0.3; T.elR = 0.6 + k * 1.2; T.spineY = -0.5;
           } else if (e.type === 'thunder') {
-            pose.legL = pose.legR = 0;
-            if (e.state === 1) { pose.armL = pose.armR = 2.2; pose.armLr = pose.armRr = 0.4; }
+            T.hipLP = T.hipRP = 0; T.knL = T.knR = 0.05;
+            if (e.state === 1) { T.shLP = T.shRP = 2.4; T.shLR = T.shRR = 0.5; T.elL = T.elR = 0.2; T.spineP = -0.2; T.neckP = -0.3; }
           } else if (e.type === 'shield') {
-            pose.armL = 1.2; pose.armLr = -0.4;
-            if (e.state === 2) pose.lean = 0.3;
+            T.shLP = 1.2; T.elL = 1.3; T.shLR = -0.2;
+            if (e.state === 2) { T.spineP = 0.35; T.shLP = 1.5; }
           }
-          const hand = Rig.draw(rig, m, pose, opts);
+          const kk0 = 1 - Math.exp(-18 * 0.016);
+          for (const key in P) P[key] += (T[key] - P[key]) * kk0;
+          const J = Skeleton.draw(body, m, P, opts);
           const L = this._L || (this._L = M4.create()), O = this._O || (this._O = M4.create());
           if (e.type === 'warrior') {
-            M4.fromTRS(L, 0, -0.66, 0, 0, 0, 0, 1, 1, 1);
-            Renderer.draw(Models.axe(), M4.multiply(O, hand, L), opts);
+            M4.fromTRS(L, 0, -0.08, 0, 0, 0, 0, 1, 1, 1);
+            Renderer.draw(Models.axe(), M4.multiply(O, J.handR, L), opts);
           } else if (e.type === 'archer') {
-            M4.fromTRS(L, 0, -0.66, 0.1, 0, 0, 0, 1, 1, 1);
-            Renderer.draw(Models.bow(), M4.multiply(O, hand, L), opts);
+            M4.fromTRS(L, 0, -0.07, 0.04, 0, 0, 0, 1, 1, 1);
+            Renderer.draw(Models.bow(), M4.multiply(O, J.handL, L), opts);
           } else if (e.type === 'shield') {
-            M4.fromTRS(L, -0.1, 1.15, 0.55 + (e.state === 2 ? 0.25 : 0), 0, 0, 0, 1, 1, 1);
-            Renderer.draw(Models.shieldMesh(), M4.multiply(O, m, L), opts);
+            M4.fromTRS(L, 0, -0.1, 0.12, 0, 0, Math.PI / 2, 1, 1, 1);
+            Renderer.draw(Models.shieldMesh(), M4.multiply(O, J.foreL, L), opts);
+          } else if (e.type === 'hover') {
+            M4.fromTRS(L, 0, -0.07, 0, 0, 0, 0, 1, 1, 1);
+            Renderer.draw(Models.spear(), M4.multiply(O, J.handR, L), opts);
+            // Långa tygband som fladdrar från ryggen.
+            const q = this._q || (this._q = V3.create());
+            for (let kk = 0; kk < 2; kk++) {
+              const pts = [];
+              M4.transformPoint(q, J.chest, [(kk - 0.5) * 0.25, 0.45, -0.14]);
+              for (let jj = 0; jj < 9; jj++) {
+                const back = jj * 0.42;
+                pts.push([q[0] - Math.sin(e.yaw) * back + Math.sin(t * 6 - jj + kk) * 0.05 * jj, q[1] - jj * 0.1 + Math.cos(t * 5 - jj) * 0.06 * jj, q[2] - Math.cos(e.yaw) * back + Math.cos(t * 6 - jj + kk) * 0.05 * jj]);
+              }
+              Renderer.ribbon(pts, 0.3, 0.6, 0.16, 0.13, 0.95, false, true);
+            }
           }
           if (e.type === 'thunder' && (e.state === 1 || Math.sin(t * 5 + e.id) > 0.7)) {
-            const k = e.state === 1 ? 1 - e.timer / 1.2 : 0.3;
-            const hx = e.pos[0] + Math.sin(e.yaw) * 0.4, hy = e.pos[1] + (e.state === 1 ? 2.2 : 1.2), hz = e.pos[2] + Math.cos(e.yaw) * 0.4;
-            Renderer.particle(hx, hy, hz, 0.25 + k * 0.6, 1, 0.2, 0.4, 0.9, true);
-            Renderer.light(hx, hy, hz, 1.5 * k + 0.3, 0.1, 0.3, 6);
-            if (e.state === 1 && k > 0.3) this.drawAimLine(e, k);
-          }
-          break;
-        }
-        case 'hover': {
-          const rig = Models.humanoid('hover', PAL.hover, { robe: true });
-          const diving = e.state === 2;
-          pose.legL = pose.legR = 0.2;
-          pose.lean = diving ? 1.2 : 0.2;
-          pose.armR = e.state >= 1 && e.state <= 2 ? 1.6 : 0.6;
-          pose.armL = 0.3; pose.armLr = 0.6;
-          const hand = Rig.draw(rig, m, pose, opts);
-          const L = this._L || (this._L = M4.create()), O = this._O || (this._O = M4.create());
-          M4.fromTRS(L, 0, -0.66, 0, 0, 0, 0, 1, 1, 1);
-          Renderer.draw(Models.spear(), M4.multiply(O, hand, L), opts);
-          // Långa tygband som fladdrar.
-          for (let k = 0; k < 2; k++) {
-            const pts = [];
-            for (let j = 0; j < 8; j++) {
-              const back = j * 0.45;
-              pts.push([e.pos[0] - Math.sin(e.yaw) * back + Math.sin(t * 6 - j + k) * 0.15 * j, e.pos[1] + 1.4 - j * 0.12 + Math.cos(t * 5 - j) * 0.1 * j, e.pos[2] - Math.cos(e.yaw) * back + (k - 0.5) * 0.4]);
+            const kk = e.state === 1 ? 1 - e.timer / 1.2 : 0.3;
+            const q = this._q || (this._q = V3.create());
+            for (const hnd of [J.handL, J.handR]) {
+              M4.transformPoint(q, hnd, [0, -0.06, 0]);
+              Renderer.particle(q[0], q[1], q[2], 0.15 + kk * 0.35, 1, 0.2, 0.4, 0.9, true);
             }
-            Renderer.ribbon(pts, 0.25, 0.55, 0.16, 0.14, 0.95, false, true);
+            Renderer.light(q[0], q[1], q[2], 1.5 * kk + 0.3, 0.1, 0.3, 6);
+            if (e.state === 1 && kk > 0.3) this.drawAimLine(e, kk);
           }
           break;
         }

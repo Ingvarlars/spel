@@ -104,6 +104,7 @@ const Game = {
     if (frame < 0) frame = 0;
     this.realTime += frame;
     if (frame > 0) this.fps += (1 / frame - this.fps) * 0.05;
+    this.frameDt = frame;
     if (this.state === 'playing') {
       this.acc += frame;
       let steps = 0;
@@ -281,6 +282,7 @@ const Game = {
   },
   onJump() {},
   onSlam(p, speed) {
+    p.landT = Math.min(1, speed / 40);
     Effects.dust(p.pos[0], p.pos[1], p.pos[2], 16, 2.5);
     Effects.shake(Math.min(0.7, speed / 60));
     // Nedslaget skadar och knuffar fiender runt omkring.

@@ -318,29 +318,53 @@ class Cloth {
     this.ready = true;
   }
 
-  // gravity = acceleration (m/s²), spheres = [[x,y,z,r], ...]
-  update(dt, mat, gravity, spheres) {
+  // gravity = acceleration (m/s²), spheres = [[x,y,z,r], ...], bodyVel = kroppens fart.
+  // Tyget följer med kroppens förflyttning; fartvinden läggs på som en kraft så
+  // att simuleringen är stabil även i hög fart och låg bildfrekvens.
+  update(dt, mat, gravity, spheres, bodyVel) {
     if (!this.ready) this.reset(mat, V3.normalize(V3.create(), gravity));
-    dt = Math.min(dt, 1 / 30);
+    dt = Math.min(dt, 1 / 20);
+    const steps = dt > 1 / 45 ? 2 : 1;
     const P = this.pos, Q = this.prev, C = this.cols, R = this.rows;
     const a = this._a;
-    // Fäst översta raden.
+    // Flytta hela tyget lika mycket som fästet flyttat sig.
+    let mx = 0, my = 0, mz = 0;
+    for (let i = 0; i < C; i++) {
+      M4.transformPoint(a, mat, this.anchors[i]);
+      mx += a[0] - P[i * 3]; my += a[1] - P[i * 3 + 1]; mz += a[2] - P[i * 3 + 2];
+    }
+    mx /= C; my /= C; mz /= C;
+    for (let k = C * 3; k < P.length; k += 3) {
+      P[k] += mx; P[k + 1] += my; P[k + 2] += mz;
+      Q[k] += mx; Q[k + 1] += my; Q[k + 2] += mz;
+    }
     for (let i = 0; i < C; i++) {
       M4.transformPoint(a, mat, this.anchors[i]);
       const k = i * 3;
       P[k] = Q[k] = a[0]; P[k + 1] = Q[k + 1] = a[1]; P[k + 2] = Q[k + 2] = a[2];
     }
-    const damp = 0.985, dt2 = dt * dt;
-    for (let r = 1; r < R; r++) {
-      for (let i = 0; i < C; i++) {
-        const k = (r * C + i) * 3;
-        for (let d = 0; d < 3; d++) {
-          const x = P[k + d];
-          P[k + d] = x + (x - Q[k + d]) * damp + gravity[d] * dt2;
-          Q[k + d] = x;
+    const h = dt / steps;
+    const damp = this.damp || 0.97, dt2 = h * h;
+    const bv = bodyVel || [0, 0, 0];
+    const wind = this._w || (this._w = [0, 0, 0]);
+    for (let d = 0; d < 3; d++) wind[d] = gravity[d] - bv[d] * 1.1;
+    for (let st = 0; st < steps; st++) {
+      for (let r = 1; r < R; r++) {
+        for (let i = 0; i < C; i++) {
+          const k = (r * C + i) * 3;
+          for (let d = 0; d < 3; d++) {
+            const x = P[k + d];
+            P[k + d] = x + (x - Q[k + d]) * damp + wind[d] * dt2;
+            Q[k + d] = x;
+          }
         }
       }
+      this.solve(spheres);
     }
+  }
+
+  solve(spheres) {
+    const P = this.pos, C = this.cols, R = this.rows;
     for (let it = 0; it < 4; it++) {
       // Lodräta, vågräta och böjande avstånd.
       for (let r = 0; r < R - 1; r++) for (let i = 0; i < C; i++) this.constrain(r * C + i, (r + 1) * C + i, this.seg, r === 0);

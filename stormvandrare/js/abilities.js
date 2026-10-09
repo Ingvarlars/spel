@@ -57,6 +57,7 @@ const Blade = {
     this.combo = (c + 1) % 3;
     p.attackAnim = 0.22;
     p.swingDir = c === 1 ? -1 : 1;
+    p.swingCombo = c;
     // Ett utfall framåt.
     V3.addScaled(p.vel, p.vel, dir, p.grounded ? (finisher ? 6 : 3) : 4);
     this.carve(this.swing, game);
@@ -122,9 +123,9 @@ const Blade = {
   },
 
   // Spår efter klingspetsen (handens matris från spelarens rigg).
-  recordTip(hand) {
-    if (!hand) return;
-    const tip = M4.transformPoint(this._t, hand, [0, -0.68, 1.9]);
+  recordTip(bladeMat) {
+    if (!bladeMat) return;
+    const tip = M4.transformPoint(this._t, bladeMat, [0, 0, 1.85]);
     this.trail.unshift({ x: tip[0], y: tip[1], z: tip[2], age: 0 });
     if (this.trail.length > 14) this.trail.length = 14;
   },
