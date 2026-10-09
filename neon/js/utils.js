@@ -127,7 +127,20 @@ const Sprites = {
     }
     return s;
   },
+
+  // Samma som get men förrenderad i ROT_FRAMES vinklar, så att roterade
+  // objekt kan ritas med en vanlig drawImage utan transform (mycket snabbare).
+  rotated(key, radius, glow, angle, draw) {
+    let a = angle % TAU;
+    if (a < 0) a += TAU;
+    const f = Math.round((a / TAU) * ROT_FRAMES) % ROT_FRAMES;
+    return this.get(key + '@' + f, radius, glow, (g) => {
+      g.rotate((f / ROT_FRAMES) * TAU);
+      draw(g);
+    });
+  },
 };
+const ROT_FRAMES = 32;
 
 // Ritar en polygon/form med neonglöd. `path` bygger en path på g.
 function neonShape(g, color, blur, lineWidth, fillAlpha, path) {

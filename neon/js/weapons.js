@@ -7,8 +7,8 @@ const WEAPONS = {
     name: 'Pulsblaster', color: '#3ff6ff',
     desc: 'Skjuter automatiskt mot närmaste fiende.',
     levels: [
-      { dmg: 10, cd: 0.5, count: 1, pierce: 0, text: 'Skjuter automatiskt mot närmaste fiende.' },
-      { dmg: 10, cd: 0.5, count: 2, pierce: 0, text: '+1 skott per salva.' },
+      { dmg: 12, cd: 0.45, count: 1, pierce: 0, text: 'Skjuter automatiskt mot närmaste fiende.' },
+      { dmg: 12, cd: 0.45, count: 2, pierce: 0, text: '+1 skott per salva.' },
       { dmg: 13, cd: 0.45, count: 2, pierce: 0, text: '+30% skada, snabbare eldtakt.' },
       { dmg: 13, cd: 0.45, count: 3, pierce: 0, text: '+1 skott per salva.' },
       { dmg: 15, cd: 0.36, count: 3, pierce: 1, text: 'Snabbare eldtakt och +1 genomträngning.' },
@@ -341,22 +341,18 @@ const Weapons = {
     game.onExplosion(b.x, b.y, b.blast, b.color);
   },
 
-  draw(ctx, game, vt) {
+  draw(ctx, game) {
     const v = game.view(20);
-    const s = vt.s;
     const a = this.bullets.active;
     for (let i = 0; i < a.length; i++) {
       const b = a[i];
       if (b.x < v.x0 || b.x > v.x1 || b.y < v.y0 || b.y > v.y1) continue;
-      const sp = b.kind === 1
-        ? Sprites.get('missile', 10, 10, (g) => neonShape(g, b.color, 10, 2, 0.5, (p) => { p.moveTo(10, 0); p.lineTo(-7, 5); p.lineTo(-7, -5); }))
-        : Sprites.get('bullet-' + b.color, 10, 8, (g) => neonShape(g, b.color, 8, 2, 0.9, (p) => { p.ellipse(0, 0, 9, 3.2, 0, 0, TAU); }));
       const ang = Math.atan2(b.vy, b.vx);
-      const c = Math.cos(ang) * s, sn = Math.sin(ang) * s;
-      ctx.setTransform(c, sn, -sn, c, vt.tx + b.x * s, vt.ty + b.y * s);
-      ctx.drawImage(sp.img, -sp.half, -sp.half);
+      const sp = b.kind === 1
+        ? Sprites.rotated('missile', 10, 10, ang, (g) => neonShape(g, b.color, 10, 2, 0.5, (p) => { p.moveTo(10, 0); p.lineTo(-7, 5); p.lineTo(-7, -5); }))
+        : Sprites.rotated('bullet-' + b.color, 10, 8, ang, (g) => neonShape(g, b.color, 8, 2, 0.9, (p) => { p.ellipse(0, 0, 9, 3.2, 0, 0, TAU); }));
+      ctx.drawImage(sp.img, b.x - sp.half, b.y - sp.half);
     }
-    ctx.setTransform(s, 0, 0, s, vt.tx, vt.ty);
     const list = game.weapons;
     for (let i = 0; i < list.length; i++) {
       const def = WEAPONS[list[i].id];

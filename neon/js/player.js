@@ -12,7 +12,7 @@ function baseStats() {
     projectiles: 0,   // extra projektiler för skjutande vapen
     pierce: 0,        // extra genomträngning
     area: 1,          // områdesmultiplikator
-    magnet: 90,       // upplockningsradie för XP
+    magnet: 110,       // upplockningsradie för XP
     regen: 0,         // HP per sekund
     shieldMax: 0,     // antal sköldladdningar
     shieldTime: 10,   // sekunder per ny laddning

@@ -333,7 +333,7 @@ const Game = {
     e.dead = true;
     this.stats.kills++;
     if (e.isBoss) this.onBossKilled(e);
-    if (e.type === 'splitter' && e.gen > 0) {
+    if (e.type === 'splitter' && e.gen > 0 && Enemies.list.length < MAX_ENEMIES + 80) {
       for (let i = 0; i < 2; i++) {
         const c = Enemies.spawn('splitter', e.x + rand(-8, 8), e.y + rand(-8, 8), e.mods, e.gen - 1);
         const a = rand(0, TAU);
@@ -452,9 +452,9 @@ const Game = {
     ctx.setTransform(s, 0, 0, s, vt.tx, vt.ty);
     this.drawBackground(ctx);
     Pickups.draw(ctx, this, this.realTime);
-    Enemies.draw(ctx, this, vt);
+    Enemies.draw(ctx, this);
     ctx.globalCompositeOperation = 'lighter';
-    Weapons.draw(ctx, this, vt);
+    Weapons.draw(ctx, this);
     ctx.globalCompositeOperation = 'source-over';
     if (this.state !== 'menu') this.player.draw(ctx, this.realTime);
     Effects.draw(ctx, this);

@@ -8,7 +8,7 @@ const Levels = {
   // XP som krävs för att gå från nivå `level` till nästa.
   xpForLevel(level) {
     const l = level - 1;
-    return Math.round(5 + l * 7 + Math.pow(l, 1.8));
+    return Math.round(5 + l * 4.5 + Math.pow(l, 1.6));
   },
 
   isBossWave(w) { return w % 5 === 0; },
@@ -22,9 +22,9 @@ const Levels = {
     if (w >= 4) weights.push({ w: 2 + 0.3 * w, v: 'splitter' });
     if (w >= 6) weights.push({ w: 0.5 + 0.25 * w, v: 'tank' });
     return {
-      rate: Math.min(16, 1.1 + 0.6 * n + 0.04 * n * n), // fiender per sekund
+      rate: Math.min(16, 0.9 + 0.5 * n + 0.035 * n * n), // fiender per sekund
       mods: {
-        hp: 1 + 0.2 * n + 0.012 * n * n,
+        hp: 1 + 0.16 * n + 0.012 * n * n,
         speed: 1 + Math.min(0.35, 0.025 * n),
         dmg: 1 + 0.08 * n,
       },

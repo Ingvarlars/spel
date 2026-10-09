@@ -271,12 +271,14 @@ const Enemies = {
   sprite(e, flash) {
     const def = e.def;
     const key = 'e-' + e.type + '-' + e.gen + (flash ? '-f' : '');
-    return Sprites.get(key, e.r, 12, (g) => {
+    // Runda delare behöver ingen rotation.
+    const angle = def.sides === 0 ? 0 : e.angle;
+    return Sprites.rotated(key, e.r * (e.type === 'dasher' ? 1.22 : 1.02), 10, angle, (g) => {
       const c = flash ? '#ffffff' : def.color;
       const path = def.sides === 0 ? circlePath(e.r) :
         e.type === 'dasher' ? (p) => { p.moveTo(e.r * 1.2, 0); p.lineTo(-e.r, e.r * 0.85); p.lineTo(-e.r * 0.5, 0); p.lineTo(-e.r, -e.r * 0.85); } :
         polyPath(def.sides, e.r, 0);
-      neonShape(g, c, 12, e.isBoss ? 4 : 2.5, flash ? 0.7 : 0.18, path);
+      neonShape(g, c, 10, e.isBoss ? 4 : 2.5, flash ? 0.7 : 0.18, path);
       if (e.type === 'tank') neonShape(g, c, 6, 2, 0, polyPath(6, e.r * 0.5, Math.PI / 6));
       if (e.type === 'shooter') neonShape(g, c, 4, 2, 0.6, circlePath(e.r * 0.3));
       if (e.isBoss) {
@@ -286,19 +288,15 @@ const Enemies = {
     });
   },
 
-  draw(ctx, game, vt) {
+  draw(ctx, game) {
     const v = game.view(60);
     const a = this.pool.active;
-    const s = vt.s;
     for (let i = 0; i < a.length; i++) {
       const e = a[i];
       if (e.dead || e.x < v.x0 || e.x > v.x1 || e.y < v.y0 || e.y > v.y1) continue;
       const sp = this.sprite(e, e.flash > 0);
-      const c = Math.cos(e.angle) * s, sn = Math.sin(e.angle) * s;
-      ctx.setTransform(c, sn, -sn, c, vt.tx + e.x * s, vt.ty + e.y * s);
-      ctx.drawImage(sp.img, -sp.half, -sp.half);
+      ctx.drawImage(sp.img, e.x - sp.half, e.y - sp.half);
     }
-    ctx.setTransform(s, 0, 0, s, vt.tx, vt.ty);
 
     if (game.boss && !game.boss.dead) Boss.drawTelegraph(game.boss, ctx);
 
@@ -340,7 +338,7 @@ const Enemies = {
 const Boss = {
   init(e, n) {
     e.level = n;
-    e.maxHp = e.hp = 1800 * (1 + 1.2 * (n - 1));
+    e.maxHp = e.hp = 1300 * (1 + 1.3 * (n - 1));
     e.dmg = 25 + 5 * n;
     e.speed = 70 + 6 * n;
     e.pattern = -1;
@@ -443,7 +441,7 @@ const Boss = {
         e.angle += dt * 0.5;
         if (e.state === 0) {
           e.state = 1;
-          const count = 5 + 2 * n;
+          const count = Math.max(0, Math.min(5 + 2 * n, MAX_ENEMIES + 80 - Enemies.list.length));
           for (let i = 0; i < count; i++) {
             const a = (i / count) * TAU;
             Enemies.spawn(n >= 2 && i % 3 === 0 ? 'dasher' : 'chaser', e.x + Math.cos(a) * (e.r + 30), e.y + Math.sin(a) * (e.r + 30), game.waveMods);
