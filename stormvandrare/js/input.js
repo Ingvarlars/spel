@@ -1,57 +1,72 @@
 'use strict';
-// Tangentbord och mus. Rörelse läses varje tick; handlingar (hugg, Lashing,
-// hopp ...) köas som händelser så att inga snabba tryck missas.
+// Tangentbord, mus (med pekarlås för kameran), handkontroll och pekskärm.
 
 const Input = {
   keys: Object.create(null),
   listeners: Object.create(null),
-  queued: Object.create(null),   // handlingar som spelaren konsumerar
-  mouse: { x: 0, y: 0, active: false, lastMove: -10 },
-  mouseLash: false,               // senaste Lashingen kom från musen
-  lashDir: { x: 0, y: 0 },        // riktning när Lashing-tangenten trycktes
+  queued: Object.create(null),
+  lookDX: 0,
+  lookDY: 0,
+  sensitivity: 0.0023,
+  invertY: false,
+  locked: false,
+  canvas: null,
+  mouseDown: [false, false, false],
+  touchMove: null,   // { x, y } från virtuell joystick (steg 8)
 
   init(canvas) {
+    this.canvas = canvas;
     const keyAction = {
-      Space: 'jump', KeyJ: 'attack', KeyK: 'lash', ShiftLeft: 'lash', ShiftRight: 'lash',
-      KeyE: 'spear', KeyQ: 'full',
+      Space: 'jump', ShiftLeft: 'dash', ShiftRight: 'dash', KeyQ: 'reset', KeyE: 'lashDown',
+      KeyR: 'full', KeyF: 'spear', KeyV: 'lash', KeyC: 'call',
     };
     const uiAction = {
-      Escape: 'pause', KeyP: 'pause', KeyM: 'mute',
+      Escape: 'pause', KeyP: 'pause', KeyM: 'mute', Tab: 'map',
       Digit1: 'choose1', Digit2: 'choose2', Digit3: 'choose3',
-      Numpad1: 'choose1', Numpad2: 'choose2', Numpad3: 'choose3',
     };
-    const block = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'];
     window.addEventListener('keydown', (e) => {
-      if (block.indexOf(e.code) !== -1 && !(e.target && e.target.tagName === 'BUTTON' && e.code === 'Space')) e.preventDefault();
+      if (['Space', 'Tab', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].indexOf(e.code) !== -1 && !(e.target && e.target.tagName === 'BUTTON')) e.preventDefault();
       if (e.repeat) return;
       this.keys[e.code] = true;
       const a = keyAction[e.code];
-      if (a) {
-        this.queued[a] = true;
-        if (a === 'lash') { this.mouseLash = false; this.readMove(this.lashDir); }
-      }
+      if (a) this.queued[a] = true;
       const u = uiAction[e.code];
       if (u) this.emit(u);
     });
     window.addEventListener('keyup', (e) => { this.keys[e.code] = false; });
-    window.addEventListener('blur', () => { this.keys = Object.create(null); this.emit('blur'); });
+    window.addEventListener('blur', () => { this.keys = Object.create(null); this.mouseDown = [false, false, false]; this.emit('blur'); });
 
-    canvas.addEventListener('mousemove', (e) => {
-      this.mouse.x = e.clientX;
-      this.mouse.y = e.clientY;
-      this.mouse.active = true;
-      this.mouse.lastMove = performance.now();
-    });
     canvas.addEventListener('mousedown', (e) => {
-      this.mouse.x = e.clientX;
-      this.mouse.y = e.clientY;
-      this.mouse.active = true;
-      this.mouse.lastMove = performance.now();
+      if (!this.locked && this.wantLock) { this.requestLock(); return; }
+      this.mouseDown[e.button] = true;
       if (e.button === 0) this.queued.attack = true;
-      else if (e.button === 2) { this.queued.lash = true; this.mouseLash = true; }
+      else if (e.button === 2) this.queued.lash = true;
       else if (e.button === 1) { this.queued.spear = true; e.preventDefault(); }
     });
+    window.addEventListener('mouseup', (e) => { this.mouseDown[e.button] = false; });
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+    window.addEventListener('mousemove', (e) => {
+      if (!this.locked) return;
+      this.lookDX += e.movementX * this.sensitivity;
+      this.lookDY += e.movementY * this.sensitivity * (this.invertY ? -1 : 1);
+    });
+    document.addEventListener('pointerlockchange', () => {
+      const was = this.locked;
+      this.locked = document.pointerLockElement === canvas;
+      if (was && !this.locked) this.emit('unlock');
+    });
+  },
+
+  wantLock: false,
+  requestLock() {
+    if (!this.canvas || this.locked) return;
+    try {
+      const r = this.canvas.requestPointerLock({ unadjustedMovement: true });
+      if (r && r.catch) r.catch(() => { try { this.canvas.requestPointerLock(); } catch (e) { /* ignorera */ } });
+    } catch (e) { /* ignorera */ }
+  },
+  releaseLock() {
+    if (document.pointerLockElement) document.exitPointerLock();
   },
 
   on(action, fn) { (this.listeners[action] || (this.listeners[action] = [])).push(fn); },
@@ -59,7 +74,6 @@ const Input = {
     const l = this.listeners[action];
     if (l) for (let i = 0; i < l.length; i++) l[i]();
   },
-
   consume(action) {
     const v = !!this.queued[action];
     this.queued[action] = false;
@@ -67,20 +81,30 @@ const Input = {
   },
   clearQueue() { this.queued = Object.create(null); },
 
-  // Riktning från tangenterna (längd 0..1).
+  // Rörelse: x = höger, y = framåt (längd 0..1).
   readMove(out) {
+    if (this.touchMove) { out.x = this.touchMove.x; out.y = this.touchMove.y; return out; }
     const k = this.keys;
     let x = 0, y = 0;
-    if (k.KeyA || k.ArrowLeft) x -= 1;
-    if (k.KeyD || k.ArrowRight) x += 1;
-    if (k.KeyW || k.ArrowUp) y -= 1;
-    if (k.KeyS || k.ArrowDown) y += 1;
-    const len = Math.hypot(x, y);
-    if (len > 1) { x /= len; y /= len; }
+    if (k.KeyA) x -= 1;
+    if (k.KeyD) x += 1;
+    if (k.KeyW) y += 1;
+    if (k.KeyS) y -= 1;
+    const l = Math.hypot(x, y);
+    if (l > 1) { x /= l; y /= l; }
     out.x = x; out.y = y;
     return out;
   },
 
-  // Musen räknas som sikte om den rörts de senaste sekunderna.
-  mouseAiming() { return this.mouse.active && performance.now() - this.mouse.lastMove < 4000; },
+  // Kamerarörelse sedan förra bildrutan (mus + piltangenter).
+  takeLook(dt) {
+    let dx = this.lookDX, dy = this.lookDY;
+    this.lookDX = this.lookDY = 0;
+    const k = this.keys;
+    if (k.ArrowLeft) dx -= 2.2 * dt;
+    if (k.ArrowRight) dx += 2.2 * dt;
+    if (k.ArrowUp) dy -= 1.6 * dt;
+    if (k.ArrowDown) dy += 1.6 * dt;
+    return { dx, dy };
+  },
 };

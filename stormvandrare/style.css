@@ -20,13 +20,26 @@ html, body {
   -webkit-user-select: none;
   user-select: none;
   -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
 }
-canvas#game {
+canvas#gl, canvas#hud {
   position: fixed;
   inset: 0;
   width: 100%;
   height: 100%;
   display: block;
   touch-action: none;
-  cursor: crosshair;
 }
+canvas#hud { pointer-events: none; }
+#nogl {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  text-align: center;
+  background: var(--night);
+}
+#nogl[hidden] { display: none; }

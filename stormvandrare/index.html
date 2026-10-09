@@ -7,19 +7,23 @@
 <title>Stormvandrare</title>
 <link rel="stylesheet" href="style.css">
 </head>
-<body data-state="menu">
-<canvas id="game"></canvas>
+<body data-state="loading">
+<canvas id="gl"></canvas>
+<canvas id="hud"></canvas>
 <div id="ui"></div>
+<div id="nogl" hidden>
+  <h1>Stormvandrare</h1>
+  <p>Din webbläsare saknar stöd för WebGL2, som spelet behöver. Prova en aktuell version av Chrome, Firefox, Edge eller Safari.</p>
+</div>
 
-<script src="js/utils.js"></script>
+<script src="js/engine/math.js"></script>
+<script src="js/engine/gl.js"></script>
+<script src="js/engine/renderer.js"></script>
 <script src="js/input.js"></script>
-<script src="js/effects.js"></script>
 <script src="js/world.js"></script>
+<script src="js/camera.js"></script>
+<script src="js/models.js"></script>
 <script src="js/player.js"></script>
-<script src="js/abilities.js"></script>
-<script src="js/enemies.js"></script>
-<script src="js/pickups.js"></script>
-<script src="js/storm.js"></script>
 <script src="js/game.js"></script>
 </body>
 </html>

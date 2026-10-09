@@ -1,465 +1,524 @@
 'use strict';
-// Banan: procedurgenererade platåer och klyftor (de Splittrade slätterna m.fl.).
-// Rutnät med typer, kollision för rektanglar och rendering i förrenderade bitar.
+// Världen: platåer som extruderade polygoner med platta toppar och branta,
+// skiktade klippväggar, spiror, block som kan skäras, broar och klyftbotten.
+// Kollision mellan sfärer och prismor är exakt; ett rutnät snabbar upp sökningar.
 
-const T_EMPTY = 0;
-const T_ROCK = 1;     // vanligt berg
-const T_BOULDER = 2;  // löst berg som en Shardblade kan skära igenom
-const T_BEDROCK = 3;  // klyftans botten och kanter, går inte att förstöra
+const CHASM_FLOOR = -46;
+const SKY_LIMIT = 160;
+const GRID_CELL = 16;
 
-const ROWS = 64;
-const FLOOR_ROW = 58;  // klyftornas botten
-const CHUNK = 16;      // rutor per renderad bit
+// Prisma: polygon i xz-planet (moturs) extruderad mellan y0 och y1.
+function makePrism(poly, y0, y1, kind) {
+  let minX = 1e9, maxX = -1e9, minZ = 1e9, maxZ = -1e9;
+  for (let i = 0; i < poly.length; i += 2) {
+    minX = Math.min(minX, poly[i]); maxX = Math.max(maxX, poly[i]);
+    minZ = Math.min(minZ, poly[i + 1]); maxZ = Math.max(maxZ, poly[i + 1]);
+  }
+  return { poly: Float32Array.from(poly), y0, y1, kind, minX, maxX, minZ, maxZ, alive: true, id: 0, hp: 0, mesh: null, cx: (minX + maxX) / 2, cz: (minZ + maxZ) / 2 };
+}
+
+// Stjärnformad polygon kring (cx, cz) med radiefunktion.
+function blobPoly(cx, cz, radius, n, rng, rough) {
+  const pts = [];
+  const ph = rng() * TAU;
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * TAU;
+    const r = radius * (1 + (Math.sin(a * 3 + ph) * 0.12 + (rng() - 0.5) * rough));
+    pts.push(cx + Math.cos(a) * r, cz + Math.sin(a) * r);
+  }
+  return pts;
+}
+
+function pointInPoly(poly, x, z) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 2; i < poly.length; j = i, i += 2) {
+    const xi = poly[i], zi = poly[i + 1], xj = poly[j], zj = poly[j + 1];
+    if ((zi > z) !== (zj > z) && x < ((xj - xi) * (z - zi)) / (zj - zi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+// Närmaste punkt på polygonens kant. Skriver till out = [x, z, avstånd²].
+function closestOnPoly(poly, x, z, out) {
+  let best = 1e18, bx = 0, bz = 0;
+  for (let i = 0, j = poly.length - 2; i < poly.length; j = i, i += 2) {
+    const ax = poly[j], az = poly[j + 1], ex = poly[i] - ax, ez = poly[i + 1] - az;
+    const t = clamp(((x - ax) * ex + (z - az) * ez) / (ex * ex + ez * ez || 1), 0, 1);
+    const px = ax + ex * t, pz = az + ez * t;
+    const d = (x - px) * (x - px) + (z - pz) * (z - pz);
+    if (d < best) { best = d; bx = px; bz = pz; }
+  }
+  out[0] = bx; out[1] = bz; out[2] = best;
+  return out;
+}
 
 const World = {
-  cols: 0,
-  rows: ROWS,
-  tiles: null,
-  width: 0,
-  height: ROWS * TILE,
-  chunks: new Map(),
-  spawns: [],       // fiender: { type, x, y }
-  sphereSpots: [],  // sfärer: { x, y, dun }
-  herbSpots: [],    // knobweed
-  decor: [],        // rockbuds och gräs
-  plateaus: [],     // { x0, x1, top } i rutor
-  arena: null,      // slutarenan { x0, x1, top }
-  bg: null,         // bakgrundslager
+  prisms: [],
+  grid: null,
+  gx0: 0, gz0: 0, gw: 0, gh: 0,
+  bounds: { x0: -100, x1: 100, z0: -100, z1: 100 },
+  plateaus: [],
+  start: null,
+  goal: null,
+  arena: null,
+  spawns: [],
+  sphereSpots: [],
+  herbSpots: [],
+  chunks: [],         // { mesh, cx, cz, r }
+  grassMesh: null,
+  budMesh: null,
+  decorMeshes: [],    // instansierade meshar för dekor
+  theme: null,
   seed: 1,
+  _cp: new Float32Array(3),
+  _q: [],
 
-  // Bygger banan för platå nummer `level` (1, 2, 3 ...).
-  generate(level, seed) {
+  // Bygger en etapp. opts: { level, length, theme, boss }
+  generate(opts, seed) {
     const rng = makeRng(seed);
     this.seed = seed;
-    const r = (a, b) => a + rng() * (b - a);
-    const ri = (a, b) => Math.floor(a + rng() * (b - a + 1));
-
-    const count = 5 + level * 2;
-    // Planera platåer: [bredd, klyfta efter].
-    const plan = [];
-    let total = 2;
-    plan.push({ w: 30, gap: ri(5, 7) });
-    for (let i = 0; i < count; i++) {
-      const w = ri(16, 34);
-      const gap = ri(5, 9 + Math.min(6, level));
-      plan.push({ w, gap });
-    }
-    plan.push({ w: 64, gap: 0 }); // slutarenan
-    for (const p of plan) total += p.w + p.gap;
-    total += 2;
-
-    this.cols = total;
-    this.width = total * TILE;
-    this.tiles = new Uint8Array(this.cols * ROWS);
-    this.chunks.clear();
+    const theme = this.theme = opts.theme || THEMES.plains;
+    this.prisms = [];
+    this.plateaus = [];
     this.spawns = [];
     this.sphereSpots = [];
     this.herbSpots = [];
-    this.decor = [];
-    this.plateaus = [];
+    const L = opts.length || 560;
+    const W = 220;
+    this.bounds = { x0: -90, x1: L + 140, z0: -W / 2 - 60, z1: W / 2 + 60 };
 
-    // Klyftans botten och banans ytterväggar.
-    for (let x = 0; x < this.cols; x++) {
-      for (let y = FLOOR_ROW; y < ROWS; y++) this.set(x, y, T_BEDROCK);
-    }
-    for (let y = 0; y < ROWS; y++) {
-      this.set(0, y, T_BEDROCK); this.set(1, y, T_BEDROCK);
-      this.set(this.cols - 1, y, T_BEDROCK); this.set(this.cols - 2, y, T_BEDROCK);
-    }
-
-    let x = 2;
-    let top = 34;
-    for (let i = 0; i < plan.length; i++) {
-      const p = plan[i];
-      const isStart = i === 0, isArena = i === plan.length - 1;
-      if (!isStart && !isArena) top = clamp(top + ri(-5, 5), 26, 40);
-      if (isArena) top = 34;
-      this.buildPlateau(x, p.w, top, rng, isStart || isArena);
-      const plat = { x0: x, x1: x + p.w - 1, top };
-      this.plateaus.push(plat);
-      if (isArena) this.arena = plat;
-      else if (!isStart) this.populate(plat, level, rng, i / plan.length);
-
-      // Klyftan efter platån: sfärer på botten och ibland en avsats på väggen.
-      if (p.gap > 0) {
-        const gx0 = x + p.w, gx1 = gx0 + p.gap - 1;
-        for (let k = 0; k < ri(1, 3); k++) {
-          this.sphereSpots.push({ x: (r(gx0 + 1, gx1)) * TILE, y: FLOOR_ROW * TILE - 12, dun: rng() < 0.6 });
-        }
-        if (rng() < 0.6) this.spawns.push({ type: 'crab', x: (gx0 + p.gap / 2) * TILE, y: FLOOR_ROW * TILE - 20 });
-        if (p.gap >= 8 && rng() < 0.5) {
-          const ly = ri(top + 6, FLOOR_ROW - 8), side = rng() < 0.5 ? gx0 : gx1 - 2;
-          for (let k = 0; k < 3; k++) this.set(side + k, ly, T_ROCK);
-          this.sphereSpots.push({ x: (side + 1.5) * TILE, y: ly * TILE - 12, dun: false });
-        }
+    // Platåer på ett ruterat nät med slump; klyftor uppstår mellan dem.
+    const cell = 68;
+    const cols = Math.ceil(L / cell) + 1, rows = Math.ceil(W / cell);
+    let id = 0;
+    const heightAt = (x, z) => (fbm2(x * 0.006 + seed * 0.01, z * 0.006, 3) - 0.5) * 22;
+    for (let i = 0; i < cols; i++) {
+      for (let j = 0; j < rows; j++) {
+        const cx = i * cell + (rng() - 0.5) * cell * 0.3;
+        const cz = -W / 2 + (j + 0.5) * cell + (rng() - 0.5) * cell * 0.3;
+        const isStart = i === 0 && j === Math.floor(rows / 2);
+        if (!isStart && rng() < 0.08) continue; // ibland ett stort hål
+        const radius = isStart ? 30 : cell * rand2(rng, 0.33, 0.47);
+        const top = isStart ? 0 : Math.round(heightAt(cx, cz));
+        const poly = blobPoly(cx, cz, radius, isStart ? 16 : 13, rng, 0.22);
+        const pr = this.addPrism(poly, CHASM_FLOOR - 4, top, 'plateau');
+        pr.id = id++;
+        pr.radius = radius;
+        this.plateaus.push(pr);
+        if (isStart) this.start = pr;
       }
-      x += p.w + p.gap;
+    }
+    // Slutarenan: en stor platå bortom de andra.
+    const ax = cols * cell + 50;
+    this.arena = this.addPrism(blobPoly(ax, 0, 60, 20, rng, 0.08), CHASM_FLOOR - 4, 2, 'plateau');
+    this.arena.radius = 60;
+    this.arena.isArena = true;
+    this.plateaus.push(this.arena);
+    this.goal = { x: ax, y: 2, z: 0 };
+
+    // Broar mellan några grannplatåer (som de som brolagen bär).
+    for (const a of this.plateaus) {
+      let best = null, bd = 1e9;
+      for (const b of this.plateaus) {
+        if (b === a || b.cx <= a.cx) continue;
+        const d = Math.hypot(b.cx - a.cx, b.cz - a.cz) - a.radius - b.radius;
+        if (d > 4 && d < 26 && d < bd) { bd = d; best = b; }
+      }
+      if (best && rng() < 0.45) this.addBridge(a, best);
     }
 
-    this.buildBackground(seed);
+    // Spiror, åsar och block på platåerna.
+    for (const pl of this.plateaus) {
+      if (pl === this.start) continue;
+      const n = pl.isArena ? 6 : randInt2(rng, 1, 4);
+      for (let k = 0; k < n; k++) {
+        const a = rng() * TAU, d = rng() * pl.radius * 0.7;
+        const x = pl.cx + Math.cos(a) * d, z = pl.cz + Math.sin(a) * d;
+        const r = rand2(rng, 1.5, 4.5);
+        const h = rand2(rng, 4, pl.isArena ? 10 : 16);
+        const boulder = rng() < 0.4;
+        const pr = this.addPrism(blobPoly(x, z, r, boulder ? 7 : 6, rng, 0.35), pl.y1 - 0.5, pl.y1 + h, boulder ? 'boulder' : 'spire');
+        if (boulder) pr.hp = 3;
+        pr.base = pl;
+      }
+    }
+
+    this.buildGrid();
+
+    // Fiender, sfärer och knobweed.
+    for (const pl of this.plateaus) {
+      if (pl === this.start || pl.isArena) continue;
+      const progress = clamp(pl.cx / L, 0, 1);
+      this.populate(pl, opts, rng, progress);
+    }
+    // Sfärer på klyftbotten.
+    for (let k = 0; k < 18 + opts.level * 2; k++) {
+      const x = rng() * L, z = (rng() - 0.5) * W;
+      if (!this.insideAny(x, CHASM_FLOOR + 1, z)) this.sphereSpots.push({ x, y: CHASM_FLOOR, z, dun: rng() < 0.5 });
+    }
+
+    this.buildMeshes(rng);
   },
 
-  buildPlateau(x0, w, top, rng, flat) {
-    const ri = (a, b) => Math.floor(a + rng() * (b - a + 1));
-    // Ojämna kanter: sidorna varierar en aning per rad.
-    let lOff = 0, rOff = 0;
-    const heights = new Int8Array(w);
-    let h = 0;
-    for (let i = 0; i < w; i++) {
-      if (!flat && i > 2 && i < w - 3 && rng() < 0.12) h = clamp(h + ri(-1, 1), -2, 2);
-      heights[i] = h;
-    }
-    for (let y = top - 3; y < FLOOR_ROW; y++) {
-      if (y > top + 2 && rng() < 0.3) lOff = clamp(lOff + ri(-1, 1), 0, 2);
-      if (y > top + 2 && rng() < 0.3) rOff = clamp(rOff + ri(-1, 1), 0, 2);
-      for (let i = lOff; i < w - rOff; i++) {
-        if (y >= top - heights[i]) this.set(x0 + i, y, T_ROCK);
-      }
-    }
-    if (flat) return;
-    // Klippformationer att ta skydd bakom (och skära i).
-    const n = ri(0, 2);
-    for (let k = 0; k < n; k++) {
-      const px = x0 + ri(3, w - 6), pw = ri(1, 3), ph = ri(3, 7);
-      const surface = this.surfaceRow(px);
-      const type = rng() < 0.6 ? T_BOULDER : T_ROCK;
-      for (let i = 0; i < pw; i++) for (let j = 1; j <= ph; j++) this.set(px + i, surface - j, type);
-      // Ibland ett överhäng.
-      if (ph >= 5 && rng() < 0.5) {
-        const dir = rng() < 0.5 ? -1 : 1;
-        for (let i = 1; i <= ri(2, 4); i++) this.set(px + (dir < 0 ? -i : pw - 1 + i), surface - ph, type);
-      }
-    }
+  addPrism(poly, y0, y1, kind) {
+    const p = makePrism(poly, y0, y1, kind);
+    this.prisms.push(p);
+    return p;
   },
 
-  // Placerar fiender, sfärer och dekor på en platå.
-  populate(plat, level, rng, progress) {
-    const ri = (a, b) => Math.floor(a + rng() * (b - a + 1));
-    const w = plat.x1 - plat.x0;
+  addBridge(a, b) {
+    // Från kanten av a till kanten av b, 3 m bred.
+    const dx = b.cx - a.cx, dz = b.cz - a.cz, d = Math.hypot(dx, dz);
+    const ux = dx / d, uz = dz / d, nx = -uz, nz = ux;
+    const x0 = a.cx + ux * (a.radius * 0.7), z0 = a.cz + uz * (a.radius * 0.7);
+    const x1 = b.cx - ux * (b.radius * 0.7), z1 = b.cz - uz * (b.radius * 0.7);
+    const y = Math.max(a.y1, b.y1) + 0.01;
+    const w = 1.6;
+    const poly = [x0 + nx * w, z0 + nz * w, x0 - nx * w, z0 - nz * w, x1 - nx * w, z1 - nz * w, x1 + nx * w, z1 + nz * w];
+    // Se till att polygonen är moturs.
+    const pr = this.addPrism(poly, y - 0.5, y, 'bridge');
+    pr.from = a; pr.to = b;
+  },
+
+  populate(pl, opts, rng, progress) {
+    const level = opts.level;
     const types = [{ w: 3, v: 'crab' }, { w: 4, v: 'warrior' }];
-    if (level >= 1 && progress > 0.25) types.push({ w: 2.5, v: 'archer' });
-    if (level >= 2) types.push({ w: 1.5 + level * 0.3, v: 'thunder' });
+    if (progress > 0.15 || level > 1) types.push({ w: 2.5, v: 'archer' });
+    if (level >= 2 || progress > 0.5) types.push({ w: 1.5 + level * 0.3, v: 'shield' });
+    if (level >= 2) types.push({ w: 1.2 + level * 0.3, v: 'thunder' });
     if (level >= 2 || progress > 0.6) types.push({ w: 1 + level * 0.4, v: 'hover' });
+    if (level >= 3 || progress > 0.7) types.push({ w: 0.8, v: 'leech' });
+    if (level >= 3) types.push({ w: 0.6 + level * 0.2, v: 'brute' });
     const total = types.reduce((s, t) => s + t.w, 0);
-    const count = ri(1, 2) + Math.floor(level * 0.7 + progress * 2);
+    const count = Math.floor(rng() * 2 + level * 0.6 + progress * 2.2);
     for (let k = 0; k < count; k++) {
       let roll = rng() * total, type = types[0].v;
       for (const t of types) { roll -= t.w; if (roll <= 0) { type = t.v; break; } }
-      const tx = ri(plat.x0 + 2, plat.x1 - 2);
-      const sy = this.surfaceRow(tx) * TILE;
-      this.spawns.push({ type, x: (tx + 0.5) * TILE, y: type === 'hover' ? sy - 200 : sy - 24 });
-      if (type === 'crab') {
-        for (let c = 0; c < ri(1, 3); c++) this.spawns.push({ type, x: (tx + c + 1) * TILE, y: sy - 20 });
-      }
+      const a = rng() * TAU, d = rng() * pl.radius * 0.6;
+      const x = pl.cx + Math.cos(a) * d, z = pl.cz + Math.sin(a) * d;
+      const elite = rng() < 0.04 + level * 0.02;
+      const y = (type === 'hover' || type === 'leech') ? pl.y1 + 8 : pl.y1 + 0.1;
+      this.spawns.push({ type, x, y, z, elite, home: pl });
+      if (type === 'crab') for (let c = 0; c < randInt2(rng, 1, 3); c++) this.spawns.push({ type, x: x + rng() * 4, y, z: z + rng() * 4, home: pl });
     }
-    if (rng() < 0.25) {
-      const tx = ri(plat.x0 + 1, plat.x1 - 1);
-      this.herbSpots.push({ x: (tx + 0.5) * TILE, y: this.surfaceRow(tx) * TILE });
+    for (let k = 0; k < randInt2(rng, 1, 3); k++) {
+      const a = rng() * TAU, d = rng() * pl.radius * 0.75;
+      this.sphereSpots.push({ x: pl.cx + Math.cos(a) * d, y: pl.y1, z: pl.cz + Math.sin(a) * d, dun: rng() < 0.35 });
     }
-    for (let k = 0; k < ri(1, 3); k++) {
-      const tx = ri(plat.x0 + 1, plat.x1 - 1);
-      this.sphereSpots.push({ x: (tx + 0.5) * TILE, y: this.surfaceRow(tx) * TILE - 12, dun: rng() < 0.35 });
+    if (rng() < 0.3) {
+      const a = rng() * TAU, d = rng() * pl.radius * 0.6;
+      this.herbSpots.push({ x: pl.cx + Math.cos(a) * d, y: pl.y1, z: pl.cz + Math.sin(a) * d });
     }
-    // Rockbuds och gräs som drar sig undan när man kommer nära.
-    for (let i = plat.x0 + 1; i < plat.x1; i++) {
-      const roll = rng();
-      if (roll < 0.12) this.decor.push({ kind: 'bud', x: (i + 0.5) * TILE, y: this.surfaceRow(i) * TILE, size: 10 + rng() * 8, open: 1, hue: rng() });
-      else if (roll < 0.45) this.decor.push({ kind: 'grass', x: (i + rng()) * TILE, y: this.surfaceRow(i) * TILE, size: 6 + rng() * 8, open: 1, hue: rng() });
-    }
-    void w;
   },
 
-  // Översta fasta raden i kolumn tx (från himlen och nedåt).
-  surfaceRow(tx) {
-    for (let y = 0; y < ROWS; y++) if (this.get(tx, y) !== T_EMPTY) return y;
-    return FLOOR_ROW;
+  // --- Rutnät för snabba sökningar ---
+  buildGrid() {
+    const b = this.bounds;
+    this.gx0 = b.x0; this.gz0 = b.z0;
+    this.gw = Math.ceil((b.x1 - b.x0) / GRID_CELL);
+    this.gh = Math.ceil((b.z1 - b.z0) / GRID_CELL);
+    this.grid = new Array(this.gw * this.gh);
+    for (let i = 0; i < this.grid.length; i++) this.grid[i] = [];
+    for (const p of this.prisms) this.gridInsert(p);
   },
 
-  get(tx, ty) {
-    if (tx < 0 || tx >= this.cols || ty >= ROWS) return T_BEDROCK;
-    if (ty < 0) return T_EMPTY;
-    return this.tiles[ty * this.cols + tx];
+  gridInsert(p) {
+    const i0 = clamp(Math.floor((p.minX - this.gx0) / GRID_CELL), 0, this.gw - 1);
+    const i1 = clamp(Math.floor((p.maxX - this.gx0) / GRID_CELL), 0, this.gw - 1);
+    const j0 = clamp(Math.floor((p.minZ - this.gz0) / GRID_CELL), 0, this.gh - 1);
+    const j1 = clamp(Math.floor((p.maxZ - this.gz0) / GRID_CELL), 0, this.gh - 1);
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) this.grid[j * this.gw + i].push(p);
   },
 
-  set(tx, ty, v) {
-    if (tx < 0 || tx >= this.cols || ty < 0 || ty >= ROWS) return;
-    this.tiles[ty * this.cols + tx] = v;
-  },
-
-  solid(tx, ty) {
-    if (ty < 0) return true; // tak över himlen
-    return this.get(tx, ty) !== T_EMPTY;
-  },
-
-  solidAtPx(x, y) { return this.solid(Math.floor(x / TILE), Math.floor(y / TILE)); },
-
-  // Tar bort en ruta (t.ex. skuren av en Shardblade). Returnerar true om något försvann.
-  carve(tx, ty) {
-    const t = this.get(tx, ty);
-    if (t !== T_BOULDER) return false;
-    this.set(tx, ty, T_EMPTY);
-    this.chunks.delete(Math.floor(tx / CHUNK) + ',' + Math.floor(ty / CHUNK));
-    return true;
-  },
-
-  rectHits(x, y, w, h) {
-    const x0 = Math.floor(x / TILE), x1 = Math.floor((x + w - 0.001) / TILE);
-    const y0 = Math.floor(y / TILE), y1 = Math.floor((y + h - 0.001) / TILE);
-    for (let ty = y0; ty <= y1; ty++) for (let tx = x0; tx <= x1; tx++) if (this.solid(tx, ty)) return true;
-    return false;
-  },
-
-  // Flyttar en kropp { x, y, w, h } (x/y = mittpunkt) axel för axel.
-  // Returnerar bitar: 1 = vänster, 2 = höger, 4 = upp, 8 = ned blockerad.
-  move(b, dx, dy) {
-    let hit = 0;
-    const hw = b.w / 2, hh = b.h / 2;
-    if (dx !== 0) {
-      const nx = b.x + dx;
-      if (this.rectHits(nx - hw, b.y - hh, b.w, b.h)) {
-        if (dx > 0) { b.x = Math.floor((nx + hw) / TILE) * TILE - hw - 0.01; hit |= 2; }
-        else { b.x = (Math.floor((nx - hw) / TILE) + 1) * TILE + hw + 0.01; hit |= 1; }
-        if (this.rectHits(b.x - hw, b.y - hh, b.w, b.h)) b.x -= dx; // säkerhetsnät
-      } else b.x = nx;
-    }
-    if (dy !== 0) {
-      const ny = b.y + dy;
-      if (this.rectHits(b.x - hw, ny - hh, b.w, b.h)) {
-        if (dy > 0) { b.y = Math.floor((ny + hh) / TILE) * TILE - hh - 0.01; hit |= 8; }
-        else { b.y = (Math.floor((ny - hh) / TILE) + 1) * TILE + hh + 0.01; hit |= 4; }
-        if (this.rectHits(b.x - hw, b.y - hh, b.w, b.h)) b.y -= dy;
-      } else b.y = ny;
-    }
-    return hit;
-  },
-
-  // Fri sikt mellan två punkter (för bågskyttar och lä i stormen).
-  lineClear(x0, y0, x1, y1) {
-    const d = Math.hypot(x1 - x0, y1 - y0);
-    const n = Math.ceil(d / (TILE / 2));
-    for (let i = 1; i < n; i++) {
-      const t = i / n;
-      if (this.solidAtPx(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t)) return false;
-    }
-    return true;
-  },
-
-  // --- Rendering ---
-
-  buildBackground(seed) {
-    const rng = makeRng(seed * 7 + 3);
-    const layer = (n, base, amp) => {
-      const pts = [];
-      let h = base;
-      for (let i = 0; i < n; i++) {
-        h = clamp(h + (rng() - 0.5) * amp, base - amp * 2, base + amp * 2);
-        pts.push(h, rng() < 0.25 ? 1 : 0); // höjd, klyfta
-      }
-      return pts;
-    };
-    this.bg = {
-      far: layer(200, 0.62, 0.05),
-      near: layer(200, 0.72, 0.06),
-      clouds: Array.from({ length: 14 }, () => ({ x: rng(), y: 0.08 + rng() * 0.3, s: 0.6 + rng() * 1.2 })),
-    };
-  },
-
-  tileColor(tx, ty, t) {
-    // Lager i berget (strata) i ockra och rost.
-    const band = Math.floor((ty + Math.sin(tx * 0.3) * 1.5) / 2) % 4;
-    if (t === T_BEDROCK) return ['#3d2e2a', '#43322c', '#3a2b27', '#40302a'][band];
-    if (t === T_BOULDER) return ['#8d6a4e', '#977354', '#86644a', '#916e51'][band];
-    return ['#a8663f', '#b5754a', '#9c5c39', '#b06d44'][band];
-  },
-
-  renderChunk(cx, cy) {
-    const c = document.createElement('canvas');
-    c.width = c.height = CHUNK * TILE;
-    const g = c.getContext('2d');
-    const rng = makeRng((cx * 73856093) ^ (cy * 19349663) ^ this.seed);
-    for (let j = 0; j < CHUNK; j++) {
-      for (let i = 0; i < CHUNK; i++) {
-        const tx = cx * CHUNK + i, ty = cy * CHUNK + j;
-        const t = this.get(tx, ty);
-        if (t === T_EMPTY || ty < 0) continue;
-        const px = i * TILE, py = j * TILE;
-        g.fillStyle = this.tileColor(tx, ty, t);
-        g.fillRect(px, py, TILE, TILE);
-        // Struktur: små fläckar.
-        g.fillStyle = 'rgba(0,0,0,0.08)';
-        for (let k = 0; k < 3; k++) g.fillRect(px + rng() * 28, py + rng() * 28, 2 + rng() * 4, 2);
-        g.fillStyle = 'rgba(255,230,190,0.06)';
-        g.fillRect(px + rng() * 28, py + rng() * 28, 3, 2);
-        const up = this.get(tx, ty - 1) === T_EMPTY;
-        const down = this.get(tx, ty + 1) === T_EMPTY;
-        const left = this.get(tx - 1, ty) === T_EMPTY;
-        const right = this.get(tx + 1, ty) === T_EMPTY;
-        if (up) {
-          // Ytan: crem (ljust stoft) och en mörk kant.
-          g.fillStyle = t === T_BOULDER ? '#b89a7a' : '#d7a77a';
-          g.fillRect(px, py, TILE, 5);
-          g.fillStyle = 'rgba(80,110,60,0.55)';
-          if (rng() < 0.5) g.fillRect(px + rng() * 20, py - 1, 8 + rng() * 8, 3);
-        }
-        g.fillStyle = 'rgba(40,20,10,0.35)';
-        if (down) g.fillRect(px, py + TILE - 4, TILE, 4);
-        if (left) g.fillRect(px, py, 3, TILE);
-        if (right) g.fillRect(px + TILE - 3, py, 3, TILE);
-        if (t === T_BOULDER) {
-          g.strokeStyle = 'rgba(40,25,15,0.35)';
-          g.lineWidth = 1;
-          g.strokeRect(px + 1.5, py + 1.5, TILE - 3, TILE - 3);
+  // Prismor nära (x, z) inom radien r (unika, levande).
+  query(x, z, r, out) {
+    out.length = 0;
+    const i0 = clamp(Math.floor((x - r - this.gx0) / GRID_CELL), 0, this.gw - 1);
+    const i1 = clamp(Math.floor((x + r - this.gx0) / GRID_CELL), 0, this.gw - 1);
+    const j0 = clamp(Math.floor((z - r - this.gz0) / GRID_CELL), 0, this.gh - 1);
+    const j1 = clamp(Math.floor((z + r - this.gz0) / GRID_CELL), 0, this.gh - 1);
+    const stamp = (this._stamp = (this._stamp || 0) + 1);
+    for (let j = j0; j <= j1; j++) {
+      for (let i = i0; i <= i1; i++) {
+        const cellList = this.grid[j * this.gw + i];
+        for (let k = 0; k < cellList.length; k++) {
+          const p = cellList[k];
+          if (!p.alive || p._s === stamp) continue;
+          p._s = stamp;
+          if (x + r < p.minX || x - r > p.maxX || z + r < p.minZ || z - r > p.maxZ) continue;
+          out.push(p);
         }
       }
     }
-    return c;
+    return out;
   },
 
-  drawBackground(ctx, game) {
-    const w = game.w, h = game.h;
-    const storm = game.stormDark || 0;
-    // Himmel.
-    const sky = ctx.createLinearGradient(0, 0, 0, h);
-    sky.addColorStop(0, storm > 0 ? lerpColor('#6fa8d8', '#1d2533', storm) : '#6fa8d8');
-    sky.addColorStop(0.6, storm > 0 ? lerpColor('#d8e6ec', '#3a4250', storm) : '#d8e6ec');
-    sky.addColorStop(1, storm > 0 ? lerpColor('#f1dcc0', '#3c3a3e', storm) : '#f1dcc0');
-    ctx.fillStyle = sky;
-    ctx.fillRect(0, 0, w, h);
-
-    // Solen.
-    if (storm < 0.8) {
-      ctx.globalAlpha = 1 - storm;
-      const sx = w * 0.78, sy = h * 0.18;
-      const sg = ctx.createRadialGradient(sx, sy, 0, sx, sy, 90);
-      sg.addColorStop(0, 'rgba(255,250,230,1)');
-      sg.addColorStop(0.25, 'rgba(255,240,200,0.8)');
-      sg.addColorStop(1, 'rgba(255,240,200,0)');
-      ctx.fillStyle = sg;
-      ctx.fillRect(sx - 90, sy - 90, 180, 180);
-      ctx.globalAlpha = 1;
-    }
-
-    // Moln med svag parallax.
-    const camX = game.cam.x;
-    ctx.fillStyle = storm > 0.3 ? 'rgba(60,66,80,0.5)' : 'rgba(255,255,255,0.55)';
-    for (const c of this.bg.clouds) {
-      const x = ((c.x * w * 3 - camX * 0.05 + game.realTime * 6) % (w * 1.5) + w * 1.5) % (w * 1.5) - w * 0.25;
-      const y = c.y * h;
-      ctx.beginPath();
-      ctx.ellipse(x, y, 60 * c.s, 14 * c.s, 0, 0, TAU);
-      ctx.ellipse(x + 30 * c.s, y - 8 * c.s, 40 * c.s, 14 * c.s, 0, 0, TAU);
-      ctx.fill();
-    }
-
-    // Avlägsna platåer i två lager.
-    this.drawLayer(ctx, game, this.bg.far, 0.15, storm > 0 ? lerpColor('#b9a99c', '#2b2e36', storm) : '#b9a99c', 0.12);
-    this.drawLayer(ctx, game, this.bg.near, 0.35, storm > 0 ? lerpColor('#a58670', '#262629', storm) : '#a58670', 0.2);
+  insideAny(x, y, z) {
+    if (y < CHASM_FLOOR) return true;
+    const list = this.query(x, z, 0.01, this._q);
+    for (const p of list) if (y >= p.y0 && y <= p.y1 && pointInPoly(p.poly, x, z)) return p;
+    return null;
   },
 
-  drawLayer(ctx, game, pts, factor, color, vfactor) {
-    const w = game.w, h = game.h;
-    const seg = 90;
-    const off = game.cam.x * factor;
-    const yOff = (game.cam.y - this.height * 0.5) * vfactor * game.zoom;
-    const n = pts.length / 2;
-    const first = Math.floor(off / seg);
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    ctx.moveTo(0, h);
-    for (let i = 0; i <= Math.ceil(w / seg) + 1; i++) {
-      const k = (((first + i) % n) + n) % n;
-      const x = (first + i) * seg - off;
-      const y = pts[k * 2] * h - yOff;
-      if (pts[k * 2 + 1]) { // klyfta
-        ctx.lineTo(x, y); ctx.lineTo(x + 10, y); ctx.lineTo(x + 14, h); ctx.lineTo(x + 30, h); ctx.lineTo(x + 34, y);
-      } else ctx.lineTo(x, y);
-      ctx.lineTo(x + seg, y);
-    }
-    ctx.lineTo(w, h);
-    ctx.closePath();
-    ctx.fill();
+  // Högsta yta under (x, y, z), eller klyftbotten.
+  groundBelow(x, y, z) {
+    let best = CHASM_FLOOR;
+    const list = this.query(x, z, 0.01, this._q);
+    for (const p of list) if (p.y1 <= y + 0.01 && p.y1 > best && pointInPoly(p.poly, x, z)) best = p.y1;
+    return best;
   },
 
-  drawTiles(ctx, game) {
-    const v = game.view(0);
-    const cs = CHUNK * TILE;
-    const cx0 = Math.max(0, Math.floor(v.x0 / cs)), cx1 = Math.floor(v.x1 / cs);
-    const cy0 = Math.max(0, Math.floor(v.y0 / cs)), cy1 = Math.min(Math.floor(ROWS / CHUNK), Math.floor(v.y1 / cs));
-    for (let cy = cy0; cy <= cy1; cy++) {
-      for (let cx = cx0; cx <= cx1; cx++) {
-        if (cx * CHUNK >= this.cols) continue;
-        const key = cx + ',' + cy;
-        let c = this.chunks.get(key);
-        if (!c) { c = this.renderChunk(cx, cy); this.chunks.set(key, c); }
-        ctx.drawImage(c, cx * cs, cy * cs);
-      }
-    }
-  },
+  // Knuffar ut en sfär (pos = [x,y,z]) ur berget. Returnerar antal kontakter;
+  // summan av kontaktnormalerna skrivs till nOut.
+  collideSphere(pos, r, nOut) {
+    let contacts = 0;
+    nOut[0] = nOut[1] = nOut[2] = 0;
+    // Klyftbotten och himlen.
+    if (pos[1] - r < CHASM_FLOOR) { pos[1] = CHASM_FLOOR + r; nOut[1] += 1; contacts++; }
+    if (pos[1] + r > SKY_LIMIT) { pos[1] = SKY_LIMIT - r; nOut[1] -= 1; contacts++; }
+    // Banans ytterkant.
+    const b = this.bounds;
+    if (pos[0] < b.x0 + r) { pos[0] = b.x0 + r; nOut[0] += 1; contacts++; }
+    if (pos[0] > b.x1 - r) { pos[0] = b.x1 - r; nOut[0] -= 1; contacts++; }
+    if (pos[2] < b.z0 + r) { pos[2] = b.z0 + r; nOut[2] += 1; contacts++; }
+    if (pos[2] > b.z1 - r) { pos[2] = b.z1 - r; nOut[2] -= 1; contacts++; }
 
-  updateDecor(dt, game) {
-    const p = game.player;
-    const v = game.view(100);
-    for (let i = 0; i < this.decor.length; i++) {
-      const d = this.decor[i];
-      if (d.x < v.x0 || d.x > v.x1) continue;
-      // Rockbuds och gräs drar sig undan när någon kommer nära eller stormen blåser.
-      const near = dist2(d.x, d.y, p.x, p.y) < (d.kind === 'bud' ? 110 * 110 : 70 * 70) || game.inStorm(d.x, d.y);
-      const target = near ? 0 : 1;
-      d.open += (target - d.open) * Math.min(1, dt * (near ? 10 : 1.2));
-    }
-  },
-
-  drawDecor(ctx, game) {
-    const v = game.view(40);
-    const t = game.realTime;
-    for (let i = 0; i < this.decor.length; i++) {
-      const d = this.decor[i];
-      if (d.x < v.x0 || d.x > v.x1 || d.y < v.y0 || d.y > v.y1) continue;
-      if (d.kind === 'bud') {
-        const s = d.size;
-        // Vinrankor som sticker ut när knoppen är öppen.
-        if (d.open > 0.05) {
-          ctx.strokeStyle = d.hue < 0.5 ? '#5c8a3a' : '#7a9a3a';
-          ctx.lineWidth = 2;
-          for (let k = -2; k <= 2; k++) {
-            const a = -Math.PI / 2 + k * 0.45 + Math.sin(t * 1.5 + d.x) * 0.08;
-            const len = s * 1.6 * d.open;
-            ctx.beginPath();
-            ctx.moveTo(d.x, d.y - s * 0.6);
-            ctx.quadraticCurveTo(d.x + Math.cos(a) * len * 0.5 + 4, d.y - s * 0.6 + Math.sin(a) * len * 0.6, d.x + Math.cos(a) * len, d.y - s * 0.6 + Math.sin(a) * len);
-            ctx.stroke();
+    const list = this.query(pos[0], pos[2], r, this._q);
+    const cp = this._cp;
+    for (let k = 0; k < list.length; k++) {
+      const p = list[k];
+      const x = pos[0], y = pos[1], z = pos[2];
+      if (y - r > p.y1 || y + r < p.y0) continue;
+      const inside = pointInPoly(p.poly, x, z);
+      closestOnPoly(p.poly, x, z, cp);
+      const edgeD = Math.sqrt(cp[2]);
+      if (inside) {
+        if (y >= p.y0 && y <= p.y1) {
+          // Mitten är inne i berget: ta kortaste vägen ut.
+          const up = p.y1 - y + r, down = y - p.y0 + r, side = edgeD + r;
+          if (up <= down && up <= side) { pos[1] += up; nOut[1] += 1; }
+          else if (down <= side) { pos[1] -= down; nOut[1] -= 1; }
+          else {
+            const ex = (cp[0] - x) / (edgeD || 1), ez = (cp[1] - z) / (edgeD || 1);
+            pos[0] += ex * side; pos[2] += ez * side; nOut[0] += ex; nOut[2] += ez;
           }
+          contacts++;
+        } else if (y > p.y1) {
+          pos[1] = p.y1 + r; nOut[1] += 1; contacts++;
+        } else {
+          pos[1] = p.y0 - r; nOut[1] -= 1; contacts++;
         }
-        // Skalet.
-        ctx.fillStyle = '#7d6a58';
-        ctx.beginPath();
-        ctx.ellipse(d.x, d.y, s, s * (0.7 + 0.15 * d.open), 0, Math.PI, TAU);
-        ctx.fill();
-        ctx.fillStyle = 'rgba(0,0,0,0.25)';
-        ctx.fillRect(d.x - s, d.y - 2, s * 2, 2);
       } else {
-        // Gräs som drar sig ned i marken.
-        const len = d.size * d.open;
-        if (len < 0.5) continue;
-        ctx.strokeStyle = d.hue < 0.5 ? '#6f9a45' : '#8daa4a';
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        for (let k = 0; k < 3; k++) {
-          const bx = d.x + k * 3;
-          ctx.moveTo(bx, d.y);
-          ctx.lineTo(bx + Math.sin(t * 2 + d.x + k) * 2, d.y - len * (0.7 + k * 0.15));
+        // Utanför polygonen: närmaste punkt på väggen (eller kanten).
+        const cy = clamp(y, p.y0, p.y1);
+        const dx = x - cp[0], dy = y - cy, dz = z - cp[1];
+        const d2 = dx * dx + dy * dy + dz * dz;
+        if (d2 < r * r && d2 > 1e-10) {
+          const d = Math.sqrt(d2), push = r - d;
+          pos[0] += dx / d * push; pos[1] += dy / d * push; pos[2] += dz / d * push;
+          nOut[0] += dx / d; nOut[1] += dy / d; nOut[2] += dz / d;
+          contacts++;
         }
-        ctx.stroke();
       }
     }
+    return contacts;
+  },
+
+  // Stråle: avstånd till första träff (eller maxD). Stegar halvmeter för halvmeter.
+  raycast(ox, oy, oz, dx, dy, dz, maxD, step) {
+    step = step || 0.5;
+    for (let t = step; t <= maxD; t += step) {
+      if (this.insideAny(ox + dx * t, oy + dy * t, oz + dz * t)) return t;
+    }
+    return maxD;
+  },
+
+  lineClear(ax, ay, az, bx, by, bz) {
+    const dx = bx - ax, dy = by - ay, dz = bz - az, d = Math.hypot(dx, dy, dz);
+    if (d < 0.01) return true;
+    return this.raycast(ax, ay, az, dx / d, dy / d, dz / d, d, 1) >= d - 0.01;
+  },
+
+  // Plattan som en punkt står på (för fiender som håller sig hemma).
+  plateauAt(x, z) {
+    const list = this.query(x, z, 0.01, this._q);
+    for (const p of list) if (p.kind === 'plateau' && pointInPoly(p.poly, x, z)) return p;
+    return null;
+  },
+
+  // Tar bort ett skuret block.
+  destroyPrism(p) {
+    p.alive = false;
+  },
+
+  // --- Meshar ---
+  buildMeshes(rng) {
+    this.chunks = [];
+    const th = this.theme;
+    const groups = new Map();
+    const chunkSize = 120;
+    for (const p of this.prisms) {
+      if (p.kind === 'boulder') { p.mesh = this.prismMesh(p, th, rng).build(); continue; }
+      const key = Math.floor(p.cx / chunkSize) + ',' + Math.floor(p.cz / chunkSize);
+      if (!groups.has(key)) groups.set(key, { mb: new MeshBuilder(), x0: 1e9, x1: -1e9, z0: 1e9, z1: -1e9 });
+      const g = groups.get(key);
+      this.prismMesh(p, th, rng, g.mb);
+      g.x0 = Math.min(g.x0, p.minX); g.x1 = Math.max(g.x1, p.maxX);
+      g.z0 = Math.min(g.z0, p.minZ); g.z1 = Math.max(g.z1, p.maxZ);
+    }
+    for (const g of groups.values()) {
+      this.chunks.push({ mesh: g.mb.build(), cx: (g.x0 + g.x1) / 2, cz: (g.z0 + g.z1) / 2, r: Math.hypot(g.x1 - g.x0, g.z1 - g.z0) / 2 + 20 });
+    }
+
+    // Klyftbotten och avlägsna mesas bortom spelområdet.
+    const mb = new MeshBuilder();
+    const b = this.bounds;
+    const fx0 = b.x0 - 400, fx1 = b.x1 + 400, fz0 = b.z0 - 400, fz1 = b.z1 + 400;
+    const step = 40;
+    for (let x = fx0; x < fx1; x += step) {
+      for (let z = fz0; z < fz1; z += step) {
+        const n = noise2(x * 0.05, z * 0.05);
+        const c = colMix(th.floor, th.floorAlt, n);
+        mb.quad([x, CHASM_FLOOR, z], [x, CHASM_FLOOR, z + step], [x + step, CHASM_FLOOR, z + step], [x + step, CHASM_FLOOR, z], c);
+      }
+    }
+    // Ring av mesas runt omkring (horisonten).
+    for (let k = 0; k < 70; k++) {
+      const a = (k / 70) * TAU + rng() * 0.05;
+      const cx = (b.x0 + b.x1) / 2 + Math.cos(a) * ((b.x1 - b.x0) / 2 + rand2(rng, 140, 520));
+      const cz = Math.sin(a) * ((b.z1 - b.z0) / 2 + rand2(rng, 120, 480));
+      const pr = makePrism(blobPoly(cx, cz, rand2(rng, 30, 80), 10, rng, 0.25), CHASM_FLOOR, rand2(rng, -10, 24), 'far');
+      this.prismMesh(pr, th, rng, mb);
+    }
+    this.chunks.push({ mesh: mb.build(), cx: 0, cz: 0, r: 1e9, far: true });
+
+    this.buildDecor(rng);
+  },
+
+  // Platta toppar, skiktade väggar (horisontella band i ockra och rost).
+  prismMesh(p, th, rng, mbIn) {
+    const mb = mbIn || new MeshBuilder();
+    const poly = p.poly, n = poly.length / 2;
+    const cx = p.cx, cz = p.cz;
+    const isRock = p.kind !== 'bridge';
+    const topCol = p.kind === 'bridge' ? th.wood : p.kind === 'boulder' ? th.boulderTop : th.top;
+    // Topp: solfjäder från mitten (polygonerna är stjärnformade).
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n;
+      const ax = poly[i * 2], az = poly[i * 2 + 1], bx = poly[j * 2], bz = poly[j * 2 + 1];
+      const k = noise2(ax * 0.08, az * 0.08) * 0.25 + rng() * 0.05;
+      const c = colMix(topCol, th.topAlt, k * (isRock ? 1 : 0.2));
+      mb.tri(cx, p.y1, cz, bx, p.y1, bz, ax, p.y1, az, c);
+    }
+    // Väggar i band.
+    const band = p.kind === 'bridge' ? 0.5 : 2.2;
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n;
+      const ax = poly[i * 2], az = poly[i * 2 + 1], bx = poly[j * 2], bz = poly[j * 2 + 1];
+      let y = p.y1;
+      let b = 0;
+      while (y > p.y0) {
+        const y2 = Math.max(p.y0, y - band * (0.7 + ((b * 7919 + Math.floor(p.y1)) % 5) * 0.15));
+        const strata = th.strata[(b + Math.floor(Math.abs(p.y1))) % th.strata.length];
+        const depthDark = 1 - clamp((p.y1 - y) / 70, 0, 0.35);
+        const c = p.kind === 'bridge' ? th.woodDark : colShade(strata, depthDark * (0.92 + noise2(ax * 0.3, y * 0.4) * 0.16));
+        mb.quad([ax, y, az], [bx, y, bz], [bx, y2, bz], [ax, y2, az], c);
+        y = y2;
+        b++;
+      }
+    }
+    if (p.kind === 'bridge') {
+      // Rep och plankor.
+      const steps = Math.floor(Math.hypot(poly[4] - poly[2], poly[5] - poly[3]) / 1.2);
+      for (let s = 0; s <= steps; s++) {
+        const t = s / steps;
+        const lx = lerp(poly[0], poly[6], t), lz = lerp(poly[1], poly[7], t);
+        const rx = lerp(poly[2], poly[4], t), rz = lerp(poly[3], poly[5], t);
+        mb.box((lx + rx) / 2, p.y1 + 0.03, (lz + rz) / 2, 0.3, 0.06, 0.3, th.woodDark);
+        mb.cyl(lx, p.y1, lz, 0.06, 0.06, 0.9, 4, th.woodDark);
+        mb.cyl(rx, p.y1, rz, 0.06, 0.06, 0.9, 4, th.woodDark);
+      }
+    }
+    return mb;
+  },
+
+  // Gräs, rockbuds och växter som ritas instansierat.
+  buildDecor(rng) {
+    const th = this.theme;
+    // Grässtrå-tuva (origo vid roten så att shadern kan krympa den).
+    const gb = new MeshBuilder();
+    for (let k = 0; k < 4; k++) {
+      const a = k * 0.8, ox = Math.cos(a) * 0.12, oz = Math.sin(a) * 0.12;
+      const c = colMix(th.grass, th.grassTip, 0.3);
+      gb.tri(ox - 0.05, 0, oz, ox + 0.05, 0, oz, ox + Math.cos(a) * 0.2, 0.7 + k * 0.08, oz + Math.sin(a) * 0.2, c);
+      gb.tri(ox, 0, oz - 0.05, ox, 0, oz + 0.05, ox + Math.cos(a) * 0.2, 0.7 + k * 0.08, oz + Math.sin(a) * 0.2, th.grassTip);
+    }
+    this.grassMesh = gb.build();
+    // Rockbud: skal med vinrankor som drar sig in.
+    const bb = new MeshBuilder();
+    bb.sphere(0, 0, 0, 0.7, 7, th.bud, 0.6);
+    for (let k = 0; k < 5; k++) {
+      const a = (k / 5) * TAU;
+      bb.cyl(Math.cos(a) * 0.2, 0.2, Math.sin(a) * 0.2, 0.06, 0.02, 1.3, 4, th.vine, null);
+    }
+    this.budMesh = bb.build();
+
+    const grass = [], buds = [];
+    const m = M4.create();
+    for (const pl of this.plateaus) {
+      const count = Math.floor(pl.radius * pl.radius * 0.05);
+      for (let k = 0; k < count; k++) {
+        const a = rng() * TAU, d = Math.sqrt(rng()) * pl.radius * 0.9;
+        const x = pl.cx + Math.cos(a) * d, z = pl.cz + Math.sin(a) * d;
+        if (!pointInPoly(pl.poly, x, z)) continue;
+        const s = rand2(rng, 0.7, 1.4);
+        M4.fromTRS(m, x, pl.y1, z, rng() * TAU, 0, 0, s, s, s);
+        if (rng() < 0.12) buds.push(...m, 1, 1, 1, 0);
+        else grass.push(...m, 1, 1, 1, 0);
+      }
+    }
+    // Lummig växtlighet i klyftorna.
+    for (let k = 0; k < 900; k++) {
+      const x = rand2(rng, this.bounds.x0, this.bounds.x1), z = rand2(rng, this.bounds.z0, this.bounds.z1);
+      if (this.insideAny(x, CHASM_FLOOR + 0.5, z)) continue;
+      const s = rand2(rng, 1.2, 2.6);
+      M4.fromTRS(m, x, CHASM_FLOOR, z, rng() * TAU, 0, 0, s, s * 1.4, s);
+      grass.push(...m, 0.8, 1.15, 0.9, 0);
+    }
+    this.grassMesh.setInstances(new Float32Array(grass), grass.length / 20);
+    this.budMesh.setInstances(new Float32Array(buds), buds.length / 20);
+  },
+
+  draw(cam) {
+    const id = this._id || (this._id = M4.create());
+    for (const c of this.chunks) {
+      if (!c.far && !cam.sphereVisible(c.cx, 0, c.cz, c.r)) continue;
+      Renderer.draw(c.mesh, id, { shadow: !c.far });
+    }
+    for (const p of this.prisms) {
+      if (p.kind === 'boulder' && p.alive && cam.sphereVisible(p.cx, (p.y0 + p.y1) / 2, p.cz, 8)) {
+        const it = Renderer.draw(p.mesh, id);
+        if (it && p.flash > 0) { it.tint[0] = it.tint[1] = it.tint[2] = 1; it.tint[3] = p.flash; }
+      }
+    }
+    Renderer.drawInstanced(this.grassMesh, true);
+    Renderer.drawInstanced(this.budMesh, true);
   },
 };
 
-// Blandar två hex-färger (t = 0..1).
-function lerpColor(a, b, t) {
-  const pa = parseInt(a.slice(1), 16), pb = parseInt(b.slice(1), 16);
-  const r = Math.round(lerp(pa >> 16, pb >> 16, t));
-  const g = Math.round(lerp((pa >> 8) & 255, (pb >> 8) & 255, t));
-  const bl = Math.round(lerp(pa & 255, pb & 255, t));
-  return 'rgb(' + r + ',' + g + ',' + bl + ')';
-}
+function rand2(rng, a, b) { return a + rng() * (b - a); }
+function randInt2(rng, a, b) { return Math.floor(a + rng() * (b - a + 1)); }
+
+// Färgteman per region.
+const THEMES = {
+  plains: {
+    name: 'Splittrade slätterna',
+    top: col('#c99a6b'), topAlt: col('#d9b48a'), boulderTop: col('#a88a6e'),
+    strata: [col('#b5683f'), col('#c47a4c'), col('#a35a36'), col('#bd7247'), col('#9a5637')],
+    floor: col('#4c5a3a'), floorAlt: col('#5e6b40'),
+    grass: col('#5f8a3a'), grassTip: col('#9fbf55'), bud: col('#7d6a58'), vine: col('#5c8a3a'),
+    wood: col('#8a6a45'), woodDark: col('#5a4128'),
+    sky: { top: [0.32, 0.55, 0.85], horizon: [0.86, 0.85, 0.78], ground: [0.55, 0.45, 0.38], sun: [1.6, 1.4, 1.1], cloud: [0.95, 0.94, 0.92] },
+    ambientSky: [0.42, 0.48, 0.58], ambientGround: [0.36, 0.26, 0.2], fog: 0.0042, sunDir: [-0.45, 0.62, 0.35],
+  },
+};
