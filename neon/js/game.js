@@ -17,6 +17,12 @@ const Game = {
   vt: { s: 1, tx: 0, ty: 0 }, // aktuell vy-transform
   stats: null,
   spawnTimer: 0,
+  level: 1,
+  xp: 0,
+  xpNext: 5,
+  wave: 0,
+  pendingLevels: 0,
+  choices: null,
 
   init() {
     this.canvas = document.getElementById('game');
@@ -24,6 +30,10 @@ const Game = {
     window.addEventListener('resize', () => this.resize());
     this.resize();
     Input.init();
+    UI.init();
+    Input.on('choose1', () => this.chooseUpgrade(0));
+    Input.on('choose2', () => this.chooseUpgrade(1));
+    Input.on('choose3', () => this.chooseUpgrade(2));
     this.newGame();
     requestAnimationFrame((t) => { this.last = t; this.loop(t); });
   },
@@ -43,6 +53,13 @@ const Game = {
     this.player.reset();
     Enemies.reset();
     Weapons.reset();
+    Pickups.reset();
+    Upgrades.reset();
+    this.level = 1;
+    this.xp = 0;
+    this.xpNext = Levels.xpForLevel(1);
+    this.pendingLevels = 0;
+    this.choices = null;
     this.weapons = [];
     this.addWeapon('blaster');
     this.stats = { kills: 0, damage: 0 };
@@ -88,6 +105,8 @@ const Game = {
 
     Enemies.update(dt, this);
     Weapons.update(dt, this);
+    Pickups.update(dt, this);
+    if (this.pendingLevels > 0) this.openLevelUp();
 
     // Kameran följer spelaren mjukt och hålls inom banan.
     const k = 1 - Math.exp(-8 * dt);
@@ -165,6 +184,49 @@ const Game = {
     this.onEnemyKilled(e);
   },
 
+  addXp(v) {
+    this.xp += v;
+    while (this.xp >= this.xpNext) {
+      this.xp -= this.xpNext;
+      this.level++;
+      this.xpNext = Levels.xpForLevel(this.level);
+      this.pendingLevels++;
+    }
+  },
+
+  openLevelUp() {
+    this.state = 'levelup';
+    this.choices = Upgrades.roll(this, 3);
+    this.onLevelUp();
+    UI.showLevelUp(this.choices, this.level - this.pendingLevels + 1, (i) => this.chooseUpgrade(i));
+  },
+
+  chooseUpgrade(i) {
+    if (this.state !== 'levelup' || !this.choices || !this.choices[i]) return;
+    Upgrades.apply(this.choices[i], this);
+    this.choices = null;
+    this.pendingLevels--;
+    if (this.pendingLevels > 0) this.openLevelUp();
+    else {
+      UI.hide();
+      this.state = 'playing';
+    }
+  },
+
+  onEnemyKilled(e) {
+    const xp = e.xp * (1 + Math.max(0, this.wave - 1) * 0.08);
+    if (xp > 0) Pickups.dropXp(e.x, e.y, Math.max(1, Math.round(xp)));
+    const r = Math.random();
+    if (r < 0.006) Pickups.spawn('heart', e.x, e.y);
+    else if (r < 0.009) Pickups.spawn('magnet', e.x, e.y);
+  },
+
+  onPickup(o) {
+    if (o.kind === 'xp') this.addXp(o.value);
+    else if (o.kind === 'heart') this.player.heal(30);
+    else if (o.kind === 'magnet') Pickups.magnetAll();
+  },
+
   render() {
     const ctx = this.ctx;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -178,11 +240,13 @@ const Game = {
     vt.ty = this.h * this.dpr / 2 - this.cam.y * s;
     ctx.setTransform(s, 0, 0, s, vt.tx, vt.ty);
     this.drawBackground(ctx);
+    Pickups.draw(ctx, this, this.realTime);
     Enemies.draw(ctx, this, vt);
     ctx.globalCompositeOperation = 'lighter';
     Weapons.draw(ctx, this, vt);
     ctx.globalCompositeOperation = 'source-over';
     this.player.draw(ctx, this.realTime);
+    UI.drawHUD(ctx, this);
   },
 
   drawBackground(ctx) {
@@ -224,7 +288,7 @@ const Game = {
   onShoot() {},
   onEnemyShoot() {},
   onEnemyHit() {},
-  onEnemyKilled() {},
+  onLevelUp() {},
   onExplosion() {},
   onMissileTrail() {},
 };
