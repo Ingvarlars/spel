@@ -18,6 +18,8 @@ const Storm = {
   count: 0,
   intensity: 0,      // hur mycket av stormen spelaren upplever (0..1)
   bolts: [],         // blixtar i fjärran { pts, life }
+  dir: 1,            // 1 = highstorm från öst, -1 = Everstorm från väst
+  red: 0,
   _c: V3.create(),
 
   reset(first, period) {
@@ -29,17 +31,32 @@ const Storm = {
     this.count = 0;
     this.intensity = 0;
     this.bolts.length = 0;
+    this.dir = 1;
+    this.red = 0;
+  },
+
+  // Everstormen: en röd storm som kommer från väst (slutbossen).
+  startEverstorm() {
+    this.state = 'active';
+    this.dir = -1;
+    this.red = 1;
+    this.wallX = World.arena.cx - 140;
+    this.tailX = this.wallX - STORM_LENGTH;
+    this.count++;
   },
 
   get active() { return this.state === 'active'; },
 
   warnProgress() { return this.state === 'warning' ? 1 - this.timer / STORM_WARNING : this.state === 'active' ? 1 : 0; },
 
-  contains(x) { return this.state === 'active' && x >= this.wallX && x <= this.tailX; },
+  contains(x) {
+    if (this.state !== 'active') return false;
+    return this.dir > 0 ? x >= this.wallX && x <= this.tailX : x <= this.wallX && x >= this.tailX;
+  },
 
   // Lä: berg strax öster om kroppen (där stormen kommer ifrån).
   sheltered(x, y, z) {
-    return World.raycast(x, y, z, 1, 0, 0, 9, 0.6) < 9 && World.raycast(x, y + 0.9, z, 1, 0, 0, 9, 0.6) < 9;
+    return World.raycast(x, y, z, this.dir, 0, 0, 9, 0.6) < 9 && World.raycast(x, y + 0.9, z, this.dir, 0, 0, 9, 0.6) < 9;
   },
 
   update(dt, game) {
@@ -59,9 +76,9 @@ const Storm = {
       }
     } else {
       const prev = this.wallX;
-      this.wallX -= STORM_SPEED * dt;
-      this.tailX -= STORM_SPEED * dt;
-      Pickups.chargeBetween(this.wallX, prev);
+      this.wallX -= STORM_SPEED * dt * this.dir;
+      this.tailX -= STORM_SPEED * dt * this.dir;
+      if (this.dir > 0) Pickups.chargeBetween(this.wallX, prev);
       const inside = this.contains(p.pos[0]);
       if (inside) {
         this.flashTimer -= dt;
@@ -76,17 +93,19 @@ const Storm = {
         if (this.debrisTimer <= 0) {
           this.debrisTimer = rand(0.3, 0.7);
           const pc = p.center(this._c);
-          Projectiles.spawn('rock', pc[0] + 40, pc[1] + rand(-3, 6), pc[2] + rand(-14, 14), -rand(28, 40), rand(-1, 2), rand(-2, 2), 10, { grav: 4, r: rand(0.25, 0.6), life: 4 });
+          Projectiles.spawn('rock', pc[0] + 40 * this.dir, pc[1] + rand(-3, 6), pc[2] + rand(-14, 14), -rand(28, 40) * this.dir, rand(-1, 2), rand(-2, 2), 10, { grav: 4, r: rand(0.25, 0.6), life: 4 });
         }
       }
-      if (this.tailX < World.bounds.x0 - 60) {
+      if ((this.dir > 0 && this.tailX < World.bounds.x0 - 60) || (this.dir < 0 && this.tailX > World.bounds.x1 + 60)) {
         this.state = 'calm';
+        this.dir = 1;
+        this.red = 0;
         this.timer = this.period;
         game.onStormEnd();
       }
     }
     // Hur mycket storm spelaren upplever.
-    const target = this.contains(p.pos[0]) ? 1 : this.state === 'warning' ? this.warnProgress() * 0.45 : this.state === 'active' ? clamp(1 - (this.wallX - p.pos[0]) / 200, 0.3, 0.7) : 0;
+    const target = this.contains(p.pos[0]) ? 1 : this.state === 'warning' ? this.warnProgress() * 0.45 : this.state === 'active' ? clamp(1 - Math.abs(this.wallX - p.pos[0]) / 200, 0.3, 0.7) : 0;
     this.intensity += (target - this.intensity) * Math.min(1, dt * 1.2);
     for (let i = this.bolts.length - 1; i >= 0; i--) {
       this.bolts[i].life -= dt;
@@ -112,8 +131,8 @@ const Storm = {
   wind(pos) {
     if (!this.contains(pos[0])) return 0;
     if (this.sheltered(pos[0], pos[1] + 0.8, pos[2])) return -2;
-    const front = clamp(1 - (pos[0] - this.wallX) / 60, 0.55, 1);
-    return -46 * front;
+    const front = clamp(1 - Math.abs(pos[0] - this.wallX) / 60, 0.55, 1);
+    return -46 * front * this.dir;
   },
 
   // Skada och Stormlight för spelaren.
@@ -136,24 +155,26 @@ const Storm = {
     env.storm = k;
     env.fog = base.fog * (1 + k * 4);
     const mix3 = (out, a, b) => { out[0] = lerp(a[0], b[0], k); out[1] = lerp(a[1], b[1], k); out[2] = lerp(a[2], b[2], k); };
-    mix3(env.skyTop, base.sky.top, [0.12, 0.14, 0.18]);
-    mix3(env.skyHorizon, base.sky.horizon, [0.24, 0.26, 0.3]);
+    const red = this.red;
+    mix3(env.skyTop, base.sky.top, red ? [0.22, 0.05, 0.07] : [0.12, 0.14, 0.18]);
+    mix3(env.skyHorizon, base.sky.horizon, red ? [0.45, 0.12, 0.12] : [0.24, 0.26, 0.3]);
     mix3(env.skyGround, base.sky.ground, [0.16, 0.16, 0.18]);
     mix3(env.cloudCol, base.sky.cloud, [0.22, 0.24, 0.28]);
     mix3(env.sunCol, base.sky.sun, [0.25, 0.27, 0.32]);
     mix3(env.ambientSky, base.ambientSky, [0.3, 0.33, 0.4]);
     env.retractAll = clamp(k * 1.4, 0, 1);
     const f = this.flash;
-    env.overlay[0] = 0.85; env.overlay[1] = 0.9; env.overlay[2] = 1; env.overlay[3] = f * 0.35;
+    env.overlay[0] = this.red ? 1 : 0.85; env.overlay[1] = this.red ? 0.3 : 0.9; env.overlay[2] = this.red ? 0.35 : 1; env.overlay[3] = f * 0.35;
   },
 
   draw(game) {
     if (this.state === 'active') {
       const b = World.bounds;
-      Renderer.stormWall = { x: this.wallX, z0: b.z0 - 300, z1: b.z1 + 300, h: 230, flash: this.flash };
+      Renderer.stormWall = { x: this.wallX, z0: b.z0 - 300, z1: b.z1 + 300, h: 230, flash: this.flash, red: this.red, dir: this.dir };
     } else Renderer.stormWall = null;
     for (const bolt of this.bolts) {
-      Renderer.ribbon(bolt.pts, 2.4, 0.8, 0.85, 1, bolt.life * 3, true);
+      if (this.red) Renderer.ribbon(bolt.pts, 2.4, 1, 0.15, 0.2, bolt.life * 3, true);
+      else Renderer.ribbon(bolt.pts, 2.4, 0.8, 0.85, 1, bolt.life * 3, true);
       Renderer.ribbon(bolt.pts, 0.6, 1, 1, 1, bolt.life * 4, true);
     }
     // Regn runt kameran.

@@ -143,6 +143,10 @@ const World = {
       }
     }
 
+    // Banans gränser: alla prismor plus marginal.
+    let bx0 = 1e9, bx1 = -1e9, bz0 = 1e9, bz1 = -1e9;
+    for (const pr of this.prisms) { bx0 = Math.min(bx0, pr.minX); bx1 = Math.max(bx1, pr.maxX); bz0 = Math.min(bz0, pr.minZ); bz1 = Math.max(bz1, pr.maxZ); }
+    this.bounds = { x0: bx0 - 60, x1: bx1 + 60, z0: bz0 - 60, z1: bz1 + 60 };
     this.buildGrid();
 
     // Fiender, sfärer och knobweed.
@@ -190,7 +194,7 @@ const World = {
     if (level >= 3 || progress > 0.7) types.push({ w: 0.8, v: 'leech' });
     if (level >= 3) types.push({ w: 0.6 + level * 0.2, v: 'brute' });
     const total = types.reduce((s, t) => s + t.w, 0);
-    const count = Math.floor(rng() * 2 + level * 0.6 + progress * 2.2);
+    const count = Math.floor(rng() * 1.6 + level * 0.45 + progress * 1.6);
     for (let k = 0; k < count; k++) {
       let roll = rng() * total, type = types[0].v;
       for (const t of types) { roll -= t.w; if (roll <= 0) { type = t.v; break; } }
@@ -199,7 +203,7 @@ const World = {
       const elite = rng() < 0.04 + level * 0.02;
       const y = (type === 'hover' || type === 'leech') ? pl.y1 + 8 : pl.y1 + 0.1;
       this.spawns.push({ type, x, y, z, elite, home: pl });
-      if (type === 'crab') for (let c = 0; c < randInt2(rng, 1, 3); c++) this.spawns.push({ type, x: x + rng() * 4, y, z: z + rng() * 4, home: pl });
+      if (type === 'crab' && rng() < 0.5) this.spawns.push({ type, x: x + rng() * 4, y, z: z + rng() * 4, home: pl });
     }
     for (let k = 0; k < randInt2(rng, 1, 3); k++) {
       const a = rng() * TAU, d = rng() * pl.radius * 0.75;

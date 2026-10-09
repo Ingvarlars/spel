@@ -114,7 +114,7 @@ const Pickups = {
           game.onSphereTaken(o);
           this.pool.releaseAt(i);
         }
-      } else if (d2 < 1.6 * 1.6) {
+      } else if (d2 < 2.2 * 2.2) {
         game.onItem(o);
         this.pool.releaseAt(i);
       }

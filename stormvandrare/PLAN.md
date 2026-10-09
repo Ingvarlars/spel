@@ -41,12 +41,16 @@ ett steg.
 | `js/player.js` | Windrunnern: rörelse relativt egen gravitation, Lashings, rusning, Stormlight, läkning |
 | `js/abilities.js` | Shardblade (kombo, siktstöd, parering, skär block, spår) |
 | `js/enemies.js` | Fiender, AI, projektiler, chockvågor, röda blixtar |
+| `js/pickups.js` | Sfärer, gemhearts, knobweed |
+| `js/storm.js` | Highstorm och Everstorm |
+| `js/bosses.js` | Fyra bossar med träffzoner och faser |
+| `js/progression.js` | Ideal och upplåsning av förmågor |
 | `js/game.js` | Loop med fast tidssteg, skada, händelser, HUD (tillfällig canvas-HUD) |
 
 Kontroller just nu: WASD, mus (pekarlås), vänsterklick = hugg, högerklick eller V =
 Lashing mot siktet (samma håll igen = starkare), E = Lashing nedåt, Q = återställ
-gravitationen, Mellanslag = hopp, Shift = Stormlight-rusning, piltangenter =
-kamera.
+gravitationen, Mellanslag = hopp, Shift = Stormlight-rusning, R = Full Lashing,
+F = Lasha fiende, G/mittenklick = spjut, C = vindkallelse, piltangenter = kamera.
 
 ## Status
 
@@ -64,9 +68,17 @@ kamera.
       gemhearts, knobweed, fiender tappar sfärer) och `js/storm.js` (förvarning,
       stormmur med egen shader, vind, lä via raycast österut, bråte, regn,
       blixtar, mörkare miljö, gräs drar sig undan). `test/storm.js`.
-- [ ] Steg 4: bossar (chasmfiend som klättrar ur klyftan, Thunderclast,
-      Fused-mästare, slutboss), etappmål (gemheart/slutarena), Ideal som låser upp
-      Full Lashing (R), spjut (F), Stormlight-rustning och vindkallelse (C).
+- [x] Steg 4: `js/bosses.js` (chasmfiend vid arenakanten som dyker ned och
+      kommer upp igen, Thunderclast med kärnor fram/bak som man måste Lasha sig
+      upp till, Himmelsk mästare/Fused som Lashar spelarens gravitation,
+      Everstormens härold med röda blixtar, röd Everstorm från väst och omvänd
+      gravitation), träffzoner, faser vid 66/33 %, varningsringar på marken.
+      `js/progression.js` (fem Ideal, egna formuleringar utom första idealets
+      motto) och förmågor i `js/abilities.js`: Full Lashing (R), Lasha fiende
+      (F), Shardblade-spjut (G/mittenklick), Stormlight-rustning, vindkallelse
+      (C). Etappflöde: nå arenan → boss → gemheart → Ideal → nästa etapp.
+      Prestanda: fiender långt bort ritas som en bakad mesh (LOD), utan skugga.
+      `test/boss.js` (BOSS=typ) och `test/chasm.js`.
 - [ ] Steg 5: effekter, spren (windspren som följer vid flygning, painspren,
       gloryspren), ljud (Web Audio) och procedurell musik.
 - [ ] Steg 6: kampanj med regioner (Splittrade slätterna, klyftornas djup,

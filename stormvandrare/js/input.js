@@ -18,7 +18,7 @@ const Input = {
     this.canvas = canvas;
     const keyAction = {
       Space: 'jump', ShiftLeft: 'dash', ShiftRight: 'dash', KeyQ: 'reset', KeyE: 'lashDown',
-      KeyR: 'full', KeyF: 'spear', KeyV: 'lash', KeyC: 'call',
+      KeyR: 'full', KeyF: 'lash2', KeyG: 'spear', KeyV: 'lash', KeyC: 'call',
     };
     const uiAction = {
       Escape: 'pause', KeyP: 'pause', KeyM: 'mute', Tab: 'map',

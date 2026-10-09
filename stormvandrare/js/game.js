@@ -18,6 +18,9 @@ const Game = {
   env: null,
   stormDark: 0,
   level: 1,
+  stageBoss: null,
+  bossSpawned: false,
+  complete: false,
   mods: { hp: 1, dmg: 1, speed: 1 },
   stats: null,
   _aim: V3.create(),
@@ -74,14 +77,20 @@ const Game = {
     };
   },
 
-  startStage(level, seed) {
+  startStage(level, seed, ideal) {
     this.level = level;
+    this.stageBoss = ['chasmfiend', 'thunderclast', 'heavenly', 'herald'][(level - 1) % 4];
+    this.bossSpawned = false;
+    this.complete = false;
+    Progression.reset(ideal || Progression.ideal);
     World.generate({ level, length: 520 + level * 40, theme: THEMES.plains }, seed);
     this.time = 0;
     this.tick = 0;
     Effects.reset();
     Enemies.reset();
     Blade.reset();
+    Abilities.reset();
+    Bosses.reset();
     this.stats = { kills: 0, damage: 0, taken: 0, wealth: 0, gemhearts: 0, stormTime: 0 };
     this.mods = { hp: 1 + (level - 1) * 0.25, dmg: 1 + (level - 1) * 0.15, speed: 1 + Math.min(0.25, (level - 1) * 0.05) };
     for (const s of World.spawns) Enemies.spawn(s.type, s.x, s.y, s.z, this.mods, s.elite, s.home);
@@ -94,7 +103,8 @@ const Game = {
     p.reset();
     const st = World.start;
     p.spawnAt(st.cx, st.y1 + 0.05, st.cz);
-    p.light = 100;
+    Progression.apply(p);
+    p.light = p.stats.maxLight;
     // Titta österut (mot målet).
     V3.set(p.facing, 1, 0, 0);
     Camera.reset(V3.create(0, 1, 0), V3.create(1, 0, 0));
@@ -132,13 +142,30 @@ const Game = {
     this.tick++;
     this.player.update(dt, this);
     Blade.update(dt, this);
+    Abilities.update(dt, this);
     Enemies.update(dt, this);
+    Bosses.update(dt, this);
+    this.updateStage(dt);
     Projectiles.update(dt, this);
     Pickups.update(dt, this);
     Storm.update(dt, this);
     Storm.affectPlayer(this.player, dt, this);
     Effects.update(dt);
     if (this.banner && (this.banner.t -= dt) <= 0) this.banner = null;
+  },
+
+  // Etappens mål: nå arenan, besegra bossen och ta dess gemheart.
+  updateStage(dt) {
+    const p = this.player;
+    const ar = World.arena;
+    if (!this.bossSpawned && p.alive && Math.hypot(p.pos[0] - ar.cx, p.pos[2] - ar.cz) < ar.radius * 0.85 && p.pos[1] > ar.y1 - 2) {
+      this.bossSpawned = true;
+      Bosses.spawn(this.stageBoss, this);
+    }
+    if (this.completeTimer > 0) {
+      this.completeTimer -= dt;
+      if (this.completeTimer <= 0) this.startStage(this.level + 1, (Math.random() * 1e9) | 0);
+    }
   },
 
   showBanner(text, sub, color, time) {
@@ -151,8 +178,8 @@ const Game = {
     let best = null, bestScore = -1e9;
     const ec = this._ec || (this._ec = V3.create());
     for (const e of Enemies.list) {
-      if (e.dead) continue;
-      Enemies.center(e, ec);
+      if (e.dead || e.invulnerable) continue;
+      if (e.boss) { const z = Bosses.zones(e)[0]; V3.set(ec, z[0], z[1], z[2]); } else Enemies.center(e, ec);
       const dx = ec[0] - pc[0], dy = ec[1] - pc[1], dz = ec[2] - pc[2], d = Math.hypot(dx, dy, dz);
       if (d > range + e.r || d < 0.01) continue;
       const c = (dx * dir[0] + dy * dir[1] + dz * dir[2]) / d;
@@ -191,6 +218,7 @@ const Game = {
   killEnemy(e) {
     e.dead = true;
     this.stats.kills++;
+    if (e.boss) { this.onBossKilled(e); return; }
     this.onEnemyKilled(e);
   },
 
@@ -219,6 +247,8 @@ const Game = {
     World.draw(Camera);
     Pickups.draw(this);
     Storm.draw(this);
+    Bosses.draw(this);
+    Abilities.draw(this);
     Enemies.draw(this);
     Projectiles.draw(this);
     p.draw(this);
@@ -282,6 +312,41 @@ const Game = {
       ctx.fillRect(o[0] - bw / 2, o[1], bw * Math.max(0, e.hp / e.maxHp), 5);
     }
     Effects.drawFloats(ctx, w, h);
+    // Bossens livmätare.
+    const boss = Bosses.boss;
+    if (boss && !boss.dead) {
+      const bw = Math.min(560, w * 0.6), bx = (w - bw) / 2, by = h - 70;
+      ctx.fillStyle = 'rgba(20,14,10,0.65)';
+      ctx.fillRect(bx - 4, by - 4, bw + 8, 20);
+      ctx.fillStyle = boss.invulnerable ? '#7a6a6a' : '#c8402a';
+      ctx.fillRect(bx, by, bw * Math.max(0, boss.hp / boss.maxHp), 12);
+      ctx.strokeStyle = 'rgba(232,210,160,0.7)';
+      ctx.strokeRect(bx - 4.5, by - 4.5, bw + 9, 21);
+      for (const f of [0.33, 0.66]) { ctx.fillStyle = 'rgba(232,210,160,0.6)'; ctx.fillRect(bx + bw * f, by, 2, 12); }
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#f1e4c4';
+      ctx.font = 'bold 15px Georgia';
+      ctx.fillText(BOSS_DEFS[boss.bossType].name.toUpperCase(), w / 2, by - 12);
+    }
+    // Förmågor och nedkylning.
+    const abil = [['R', 'full', 'Full Lashing'], ['F', 'lashEnemy', 'Lasha fiende'], ['G', 'spear', 'Spjut'], ['C', 'wind', 'Vindkallelse']];
+    let ax = w - 290;
+    for (const a of abil) {
+      const on = Progression.has(a[1]);
+      ctx.fillStyle = on ? 'rgba(20,16,12,0.55)' : 'rgba(20,16,12,0.25)';
+      ctx.fillRect(ax, h - 40, 52, 26);
+      if (on && Abilities.cd[a[1]] > 0) { ctx.fillStyle = 'rgba(140,190,255,0.35)'; ctx.fillRect(ax, h - 40, 52 * (Abilities.cd[a[1]] / Abilities.cooldown[a[1]]), 26); }
+      ctx.fillStyle = on ? '#e8f4ff' : 'rgba(232,220,200,0.35)';
+      ctx.font = 'bold 13px Georgia';
+      ctx.textAlign = 'center';
+      ctx.fillText(a[0], ax + 26, h - 22);
+      ax += 58;
+    }
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#d4af4a';
+    ctx.font = 'italic 13px Georgia';
+    ctx.fillText(IDEALS[Progression.ideal - 1].title + ' · Etapp ' + this.level, 20, 92);
+
     // Stormvarning och lä.
     ctx.textAlign = 'left';
     ctx.font = 'italic 14px Georgia';
@@ -379,16 +444,63 @@ const Game = {
       this.stats.gemhearts++;
       p.addLight(p.stats.maxLight);
       Effects.burst(c[0], c[1], c[2], [0.4, 1, 0.65], 40, 6, 1, 0.12);
-      this.showBanner('Gemheart', 'Stormlight fyller dig', '#9dffc8', 2.5);
+      if (this.bossSpawned && !Bosses.boss && !this.complete) this.stageComplete();
+      else this.showBanner('Gemheart', 'Stormlight fyller dig', '#9dffc8', 2.5);
     } else if (o.kind === 'knobweed') {
       p.hp = Math.min(p.stats.maxHp, p.hp + 35);
       Effects.text(c[0], c[1] + 1, c[2], '+35', '#9be37a', 18);
     }
   },
+  // Etappen klar: svär nästa Ideal och gå vidare.
+  stageComplete() {
+    this.complete = true;
+    const ideal = Progression.swearNext(this);
+    const p = this.player;
+    const c = p.center(this._c);
+    if (ideal) {
+      this.showBanner(ideal.title + ': \u201d' + ideal.words + '\u201d', 'Orden accepteras. Nytt: ' + ideal.grants, '#bfe6ff', 6);
+      Effects.burst(c[0], c[1], c[2], [0.85, 0.95, 1], 120, 14, 1.5, 0.14);
+      Effects.shake(0.5);
+    } else this.showBanner('Etappen klar', 'Gemheart skördat', '#f0d890', 4);
+    this.completeTimer = 7;
+  },
+
   onStormWarning() { this.showBanner('Highstormen närmar sig!', 'Sök lä på klippornas västra sida', '#dbe7ff', 4); },
   onStormStart() { Effects.shake(0.3); },
   onStormEnd() { this.showBanner('Stormen har passerat', 'Sfärerna glöder igen', '#f3e6c8', 3); },
   onLightning() { Effects.shake(0.12); },
+  onBossSpawn(e, def) { this.showBanner(def.name, def.title, '#f0c070', 4); Effects.shake(0.5); },
+  onBossPhase(e) { Effects.shake(0.6); this.showBanner(BOSS_DEFS[e.bossType].name + ' rasar!', '', '#ff9a7a', 2); },
+  onBossWindup() {},
+  onBossRoar(e) { Effects.shake(0.4); },
+  onBossEmerge(e) { Effects.shake(0.6); Effects.dust(e.pos[0], e.pos[1], e.pos[2], 40, 6); },
+  onBossBite() {},
+  onBossSlam() {},
+  onBossThrow() {},
+  onBossCurse() {},
+  onCursed(p) { const c = p.center(this._c); Effects.burst(c[0], c[1], c[2], [0.9, 0.3, 1], 30, 6, 0.8, 0.1); this.showBanner('Din gravitation har Lashats!', 'Tryck Q för att ta tillbaka den', '#e0a0ff', 2); },
+  onLocked(key) { this.showBanner('Ej upplåst ännu', 'Svär fler Ideal för att låsa upp förmågan', '#d8c8a8', 1.6); },
+  onFullLashing(c, n) { Effects.burst(c[0], c[1] - 0.8, c[2], [0.85, 0.95, 1], 50, 12, 0.6, 0.12); Effects.shake(0.3); },
+  onLashEnemy(e) { const c = Enemies.center(e, this._c); Effects.burst(c[0], c[1], c[2], [0.85, 0.95, 1], 24, 5, 0.5, 0.1); },
+  onSpear() {},
+  onWindCall(t) { Effects.dust(t.x, t.y, t.z, 30, 4); },
+  onArmorHit(p) { const c = p.center(this._c); Effects.burst(c[0], c[1], c[2], [0.7, 0.85, 1], 16, 4, 0.4, 0.08); },
+  startEverstorm() { Storm.startEverstorm(); this.showBanner('Everstormen!', 'Sök lä på klippornas östra sida', '#ff7a7a', 3.5); },
+  onBossKilled(e) {
+    const ar = World.arena;
+    const z = Bosses.zones(e)[0];
+    for (let k = 0; k < 5; k++) Effects.burst(z[0] + rand(-3, 3), z[1] + rand(-2, 3), z[2] + rand(-3, 3), [1, 0.85, 0.6], 40, 10, 1.2, 0.18);
+    Effects.shake(1);
+    let gx = clamp(z[0], ar.cx - ar.radius * 0.6, ar.cx + ar.radius * 0.6), gz = clamp(z[2], ar.cz - ar.radius * 0.6, ar.cz + ar.radius * 0.6);
+    // Flytta in mot mitten tills platsen är fri från klippor.
+    for (let k = 0; k < 30 && World.insideAny(gx, ar.y1 + 0.6, gz); k++) { gx = lerp(gx, ar.cx, 0.15) + rand(-1, 1); gz = lerp(gz, ar.cz, 0.15) + rand(-1, 1); }
+    Pickups.spawnItem('gemheart', gx, ar.y1, gz, false);
+    for (let k = 0; k < 8; k++) Pickups.spawnSphere(gx + rand(-4, 4), ar.y1 + 1, gz + rand(-4, 4), randInt(0, 2), true, true);
+    Bosses.boss = null;
+    Storm.red = 0;
+    this.stats.bosses = (this.stats.bosses || 0) + 1;
+    this.showBanner(BOSS_DEFS[e.bossType].name + ' besegrad', 'Ta dess gemheart', '#f0d890', 4);
+  },
   onEnemyKilled(e) {
     Pickups.dropFromEnemy(e);
     const c = Enemies.center(e, this._c);

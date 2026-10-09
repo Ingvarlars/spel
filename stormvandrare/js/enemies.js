@@ -36,7 +36,7 @@ function createEnemy() {
     yaw: 0, r: 0.4, h: 1.8, hp: 1, maxHp: 1, dmg: 0, speed: 0, state: 0, timer: 0, cd: 0,
     grounded: false, flash: 0, dead: false, alert: false, stun: 0, float: 0, lastSwing: -1,
     los: false, losTimer: 0, anim: 0, elite: false, mods: null, boss: false, home: null,
-    turnTimer: 0, fallV: 0, wallClimb: false, seen: false, scale: 1,
+    turnTimer: 0, fallV: 0, wallClimb: false, seen: false, scale: 1, lash: 0, lashDir: null, lastSpeed: 0,
   };
 }
 
@@ -208,6 +208,7 @@ const Enemies = {
     e.anim = rand(0, 10); e.elite = !!elite; e.mods = m; e.boss = false;
     e.home = home || World.plateauAt(x, z);
     e.turnTimer = 0; e.wallClimb = false; e.seen = false;
+    e.lash = 0; e.lashDir = null; e.lastSpeed = 0; e.pose = null; e.invulnerable = false;
     return e;
   },
 
@@ -242,7 +243,7 @@ const Enemies = {
 
       let wantX = 0, wantZ = 0, wantY = 0;
       if (e.stun > 0) { e.stun -= dt; e.state = 0; }
-      else if (p.alive && e.float <= 0) {
+      else if (p.alive && !(e.lash > 0)) {
         const w = this.think(e, dt, game, dx, dy, dz, d);
         if (w) { wantX = w[0]; wantY = w[1]; wantZ = w[2]; }
       }
@@ -282,10 +283,11 @@ const Enemies = {
       const k = 1 - Math.exp(-(e.grounded ? 10 : 1.5) * dt);
       v[0] += (wx - v[0]) * k;
       v[2] += (wz - v[2]) * k;
-      if (e.float > 0) {
-        // Full Lashing: fienden faller uppåt.
-        e.float -= dt;
-        v[1] += G_BASE * 1.1 * dt;
+      if (e.float > 0) { e.lash = Math.max(e.lash || 0, e.float); e.lashDir = e.lashDir || [0, 1, 0]; e.float = 0; }
+      if (e.lash > 0) {
+        // Lashad: fienden faller åt det håll Windrunnern bestämde.
+        e.lash -= dt;
+        V3.addScaled(v, v, e.lashDir, G_BASE * 1.2 * dt);
       } else if (e.wallClimb) {
         v[1] = 3.5;
       } else {
@@ -313,7 +315,9 @@ const Enemies = {
       }
     }
     if (grounded && !e.grounded && fallV < -20 && !flying) this.impact(e, -fallV, game);
-    if (hitCeil && e.float > 0 && fallV > 14) this.impact(e, fallV, game);
+    const speed = V3.len(v);
+    if (e.lash > 0 && (hitWall || hitCeil || grounded) && (e.lastSpeed || 0) > 14) { this.impact(e, e.lastSpeed, game); e.lash = 0; }
+    e.lastSpeed = Math.max(speed, Math.abs(fallV));
     e.grounded = grounded;
     e.wallClimb = e.type === 'crab' && hitWall && e.alert;
     if (e.pos[1] < CHASM_FLOOR - 5) e.pos[1] = CHASM_FLOOR + 1;
@@ -563,7 +567,7 @@ const Enemies = {
 
   // Sköldbäraren blockerar hugg framifrån (inte ovanifrån eller bakifrån).
   blocks(e, from) {
-    if (e.type !== 'shield' || e.stun > 0 || e.float > 0) return false;
+    if (e.type !== 'shield' || e.stun > 0 || e.lash > 0) return false;
     const dx = from[0] - e.pos[0], dz = from[2] - e.pos[2], d = Math.hypot(dx, dz) || 1;
     const front = (dx * Math.sin(e.yaw) + dz * Math.cos(e.yaw)) / d > 0.25;
     const above = from[1] > e.pos[1] + e.h + 0.2;
@@ -578,7 +582,10 @@ const Enemies = {
     for (let i = 0; i < a.length; i++) {
       const e = a[i];
       if (e.boss || !Camera.sphereVisible(e.pos[0], e.pos[1] + e.h / 2, e.pos[2], e.h + 1)) continue;
-      const opts = e.flash > 0 ? { tint: [1, 1, 1, 0.75] } : null;
+      const camD = V3.dist(Camera.pos, e.pos);
+      if (camD > 170) continue;
+      const far = camD > 35;
+      const opts = e.flash > 0 ? { tint: [1, 1, 1, 0.75], shadow: !far } : far ? { shadow: false } : null;
       const s = e.scale;
       M4.fromTRS(m, e.pos[0], e.pos[1], e.pos[2], e.yaw, 0, 0, s, s, s);
       const moving = Math.hypot(e.vel[0], e.vel[2]);
@@ -598,6 +605,11 @@ const Enemies = {
         case 'thunder':
         case 'hover': {
           const body = Body.build('e-' + e.type, ENEMY_PAL[e.type], ENEMY_BODY[e.type]);
+          if (far) {
+            // Långt bort: en enda bakad mesh.
+            Renderer.draw(Body.lod('e-' + e.type, body), m, opts);
+            break;
+          }
           const P = e.pose || (e.pose = makePose());
           const T = this._T || (this._T = makePose());
           const base = this._B || (this._B = makePose());

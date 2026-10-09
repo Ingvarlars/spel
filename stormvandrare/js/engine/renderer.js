@@ -269,6 +269,7 @@ layout(location=0) in vec2 a_uv;
 uniform mat4 u_viewProj;
 uniform vec4 u_wall;   // x, z0, z1, höjd
 uniform float u_time;
+uniform float u_dir;
 out vec2 v_uv;
 out vec3 v_world;
 void main() {
@@ -276,7 +277,7 @@ void main() {
   float y = mix(-60.0, u_wall.w, a_uv.y);
   float bil = sin(z * 0.05 + u_time * 0.9) * 14.0 + sin(z * 0.017 - u_time * 0.5 + y * 0.02) * 22.0 + sin(y * 0.04 + u_time * 1.3) * 8.0;
   // Muren lutar framåt upptill som en våg.
-  float lean = a_uv.y * a_uv.y * -60.0;
+  float lean = a_uv.y * a_uv.y * -60.0 * u_dir;
   vec3 p = vec3(u_wall.x + bil + lean, y, z);
   v_uv = a_uv;
   v_world = p;
@@ -287,6 +288,7 @@ in vec2 v_uv;
 in vec3 v_world;
 uniform float u_time;
 uniform float u_flash;
+uniform float u_red;
 out vec4 o_color;
 float h21(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float n2(vec2 p) {
@@ -302,7 +304,8 @@ void main() {
   vec3 dark = vec3(0.12, 0.14, 0.18), mid = vec3(0.32, 0.35, 0.4), crem = vec3(0.45, 0.38, 0.3);
   vec3 c = mix(dark, mid, n);
   c = mix(c, crem, smoothstep(0.55, 0.9, n2v) * (1.0 - v_uv.y) * 0.8);
-  c += vec3(0.75, 0.8, 1.0) * u_flash * (0.4 + n * 0.8);
+  c = mix(c, c * vec3(1.6, 0.35, 0.35) + vec3(0.12, 0.0, 0.0), u_red);
+  c += mix(vec3(0.75, 0.8, 1.0), vec3(1.0, 0.25, 0.3), u_red) * u_flash * (0.4 + n * 0.8);
   float a = 0.94 * smoothstep(0.0, 0.08, v_uv.y) * smoothstep(1.0, 0.75, v_uv.y);
   a *= smoothstep(0.0, 0.04, v_uv.x) * smoothstep(1.0, 0.96, v_uv.x);
   o_color = vec4(c, a);
@@ -730,6 +733,8 @@ const Renderer = {
       gl.uniform4f(prog.u.u_wall, w.x, w.z0, w.z1, w.h);
       gl.uniform1f(prog.u.u_time, this.time);
       gl.uniform1f(prog.u.u_flash, w.flash);
+      gl.uniform1f(prog.u.u_red, w.red || 0);
+      gl.uniform1f(prog.u.u_dir, w.dir || 1);
       gl.disable(gl.CULL_FACE);
       gl.bindVertexArray(this.stormVao);
       gl.drawArrays(gl.TRIANGLES, 0, this.stormCount);

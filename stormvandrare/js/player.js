@@ -192,7 +192,7 @@ class Player {
     const wind = game.wind(this.pos);
     if (wind) this.vel[0] += wind * dt;
     const fall = V3.dot(this.vel, this.g);
-    const maxFall = 34 + 22 * (this.strength - 1);
+    const maxFall = (34 + 22 * (this.strength - 1)) * (this.lashed ? this.stats.flySpeed || 1 : 1);
     if (fall > maxFall) V3.addScaled(this.vel, this.vel, this.g, maxFall - fall);
     const sp = V3.len(this.vel);
     if (sp > 75) V3.scale(this.vel, this.vel, 75 / sp);
@@ -276,7 +276,9 @@ class Player {
 
   takeDamage(amount, game, from) {
     if (!this.alive || this.invuln > 0) return 0;
-    const dmg = amount * (1 - this.stats.armor);
+    let dmg = amount * (1 - this.stats.armor);
+    // Stormlight-rustning (fjärde Idealet) tar en del av smällen.
+    if (this.stats.armorLight && this.light > 20) { this.light -= dmg * 0.3; dmg *= 0.6; game.onArmorHit(this); }
     this.hp -= dmg;
     this.invuln = 0.6;
     this.hurtFlash = 0.25;

@@ -176,6 +176,38 @@ const Body = {
   },
 };
 
+// Bakar ihop en kropp i viloläge till en enda mesh (för fiender långt bort).
+Body.lod = function (key, body) {
+  const ck = key + '-lod';
+  if (this.cache[ck]) return this.cache[ck];
+  const pose = makePose();
+  pose.shLR = 0.12; pose.shRR = 0.12; pose.elL = 0.3; pose.elR = 0.3;
+  // Kör skelettet utan att rita för att få ledernas matriser.
+  const saved = Renderer.draw;
+  const items = [];
+  Renderer.draw = (mesh, m) => { items.push([mesh, Float32Array.from(m)]); return null; };
+  Skeleton.draw(body, M4.create(), pose, null);
+  Renderer.draw = saved;
+  // Kopiera hörnen med respektive matris.
+  const out = [];
+  const gl = GL.gl;
+  for (const [mesh, m] of items) {
+    const data = mesh.cpu;
+    if (!data) continue;
+    for (let i = 0; i < data.length; i += VERT_FLOATS) {
+      const p = M4.transformPoint([0, 0, 0], m, [data[i], data[i + 1], data[i + 2]]);
+      const nx = m[0] * data[i + 3] + m[4] * data[i + 4] + m[8] * data[i + 5];
+      const ny = m[1] * data[i + 3] + m[5] * data[i + 4] + m[9] * data[i + 5];
+      const nz = m[2] * data[i + 3] + m[6] * data[i + 4] + m[10] * data[i + 5];
+      const l = Math.hypot(nx, ny, nz) || 1;
+      out.push(p[0], p[1], p[2], nx / l, ny / l, nz / l, data[i + 6], data[i + 7], data[i + 8], data[i + 9]);
+    }
+  }
+  void gl;
+  const arr = new Float32Array(out);
+  return (this.cache[ck] = new Mesh(arr, arr.length / VERT_FLOATS));
+};
+
 // Pose: vinklar i radianer. P = framåt (pitch), Y = gir, R = utåt (roll).
 function makePose() {
   return {

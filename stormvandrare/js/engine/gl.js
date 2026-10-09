@@ -75,6 +75,7 @@ class Mesh {
     gl.bindVertexArray(null);
     this.instBuf = null;
     this.instCap = 0;
+    this.cpu = data; // behålls för att kunna bakas ihop (LOD)
     // Gränslåda (för culling).
     let r = 0;
     for (let i = 0; i < count; i++) {
