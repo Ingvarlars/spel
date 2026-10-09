@@ -21,9 +21,9 @@ const ENEMY_BODY = {
 
 const ENEMY_DEFS = {
   crab:    { name: 'Kremling',              hp: 16,  r: 0.38, h: 0.6, speed: 4.2, dmg: 7,  weight: 0.5, contact: true,  glow: 1 },
-  warrior: { name: 'Parshendi-krigare',     hp: 60,  r: 0.42, h: 1.9, speed: 5.4, dmg: 18, weight: 1.2, contact: false, glow: 3 },
+  warrior: { name: 'Parshendi-krigare',     hp: 60,  r: 0.42, h: 1.9, speed: 5.4, dmg: 18, weight: 1.2, contact: false, glow: 3, plated: true },
   archer:  { name: 'Parshendi-bågskytt',    hp: 38,  r: 0.4,  h: 1.85, speed: 4.6, dmg: 12, weight: 1,  contact: false, glow: 3 },
-  shield:  { name: 'Parshendi-sköldbärare', hp: 80,  r: 0.5,  h: 2.0, speed: 3.6, dmg: 15, weight: 2.5, contact: false, glow: 4 },
+  shield:  { name: 'Parshendi-sköldbärare', hp: 80,  r: 0.5,  h: 2.0, speed: 3.6, dmg: 15, weight: 2.5, contact: false, glow: 4, plated: true },
   thunder: { name: 'Stormform',             hp: 50,  r: 0.42, h: 1.95, speed: 4,  dmg: 24, weight: 1,  contact: false, glow: 4 },
   hover:   { name: 'Fused (Himmelsk)',      hp: 64,  r: 0.45, h: 2.0, speed: 9,   dmg: 16, weight: 1,  contact: false, glow: 5, flying: true },
   leech:   { name: 'Voidspren',             hp: 28,  r: 0.5,  h: 1.0, speed: 9,   dmg: 0,  weight: 0.5, contact: false, glow: 4, flying: true },

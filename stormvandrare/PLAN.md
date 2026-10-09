@@ -38,6 +38,8 @@ ett steg.
 | `js/models.js` | Vapen, Shardblade, kremling, voidspren och stenbjässe |
 | `js/character.js` | Ny kroppsbyggare (`Body`), skelett (`Skeleton`), poser (`makePose`, `Anim`) och tyg (`Cloth`) |
 | `js/effects.js` | Partiklar, skärmskakning, flytande text |
+| `js/audio.js`, `js/music.js` | Ljud och procedurell musik |
+| `js/spren.js` | Spren och Lirra |
 | `js/player.js` | Windrunnern: rörelse relativt egen gravitation, Lashings, rusning, Stormlight, läkning |
 | `js/abilities.js` | Shardblade (kombo, siktstöd, parering, skär block, spår) |
 | `js/enemies.js` | Fiender, AI, projektiler, chockvågor, röda blixtar |
@@ -79,8 +81,12 @@ F = Lasha fiende, G/mittenklick = spjut, C = vindkallelse, piltangenter = kamera
       (C). Etappflöde: nå arenan → boss → gemheart → Ideal → nästa etapp.
       Prestanda: fiender långt bort ritas som en bakad mesh (LOD), utan skugga.
       `test/boss.js` (BOSS=typ) och `test/chasm.js`.
-- [ ] Steg 5: effekter, spren (windspren som följer vid flygning, painspren,
-      gloryspren), ljud (Web Audio) och procedurell musik.
+- [x] Steg 5: `js/audio.js` (syntetiserade ljud, kompressor, eko, slingor för
+      stormvind, regn, flygvind och Parshendis nynnande), `js/music.js`
+      (procedurell drönare + dorisk kalimba-melodi, trummor i strid/boss/storm),
+      `js/spren.js` (windspren, honorsprenen Lirra med `Spren.say()` för repliker,
+      gloryspren, painspren, anticipationspren, fearspren, lifespren), röd
+      skadeblixt och puls vid lågt liv, fotsteg.
 - [ ] Steg 6: kampanj med regioner (Splittrade slätterna, klyftornas djup,
       Frostlanden, stormens ursprung), karta, läger med färdighetsträd
       (gemhearts), berättelse och Lirras repliker, oändligt läge.

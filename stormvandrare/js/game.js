@@ -40,6 +40,10 @@ const Game = {
     this.resize();
     Input.init(this.glCanvas);
     Input.wantLock = true;
+    const unlock = () => Sound.unlock();
+    window.addEventListener('keydown', unlock);
+    window.addEventListener('pointerdown', unlock);
+    Input.on('mute', () => { Sound.muted = !Sound.muted; Sound.applyVolume(); });
     this.env = this.makeEnv(THEMES.plains);
     this.startStage(1, 12345);
     requestAnimationFrame((t) => { this.last = t; this.loop(t); });
@@ -105,6 +109,7 @@ const Game = {
     p.spawnAt(st.cx, st.y1 + 0.05, st.cz);
     Progression.apply(p);
     p.light = p.stats.maxLight;
+    Spren.reset(p);
     // Titta österut (mot målet).
     V3.set(p.facing, 1, 0, 0);
     Camera.reset(V3.create(0, 1, 0), V3.create(1, 0, 0));
@@ -145,7 +150,9 @@ const Game = {
     Abilities.update(dt, this);
     Enemies.update(dt, this);
     Bosses.update(dt, this);
+    Spren.update(dt, this);
     this.updateStage(dt);
+    this.updateAudio(dt);
     Projectiles.update(dt, this);
     Pickups.update(dt, this);
     Storm.update(dt, this);
@@ -166,6 +173,38 @@ const Game = {
       this.completeTimer -= dt;
       if (this.completeTimer <= 0) this.startStage(this.level + 1, (Math.random() * 1e9) | 0);
     }
+  },
+
+  // Ljudslingor och musikläge efter vad som händer.
+  updateAudio() {
+    if (!Sound.ready()) return;
+    const p = this.player;
+    const k = Storm.intensity;
+    Sound.setLoop('wind', k * 0.5 + Math.min(0.25, V3.len(p.vel) / 150), 300 + k * 500);
+    Sound.setLoop('rain', k > 0.3 ? (k - 0.3) * 0.35 : 0);
+    Sound.setLoop('flight', !p.grounded && p.lashed ? Math.min(0.3, V3.len(p.vel) / 120) : 0, 500 + V3.len(p.vel) * 20);
+    let hum = 0, combat = false;
+    for (const e of Enemies.list) {
+      if (e.dead) continue;
+      const d = V3.dist(e.pos, p.pos);
+      if ((e.type === 'warrior' || e.type === 'archer' || e.type === 'shield') && d < 25) hum += (1 - d / 25) * 0.05;
+      if (e.alert && d < 35) combat = true;
+    }
+    Sound.setLoop('hum', Math.min(0.12, hum));
+    Music.setMode(Bosses.boss && !Bosses.boss.dead ? 'boss' : combat ? 'combat' : Storm.contains(p.pos[0]) ? 'storm' : 'explore');
+    Music.update();
+    // Fotsteg.
+    if (p.grounded && Math.hypot(p.vel[0], p.vel[2]) > 2) {
+      const ph = Math.floor(((p.phase || 0) + Math.PI / 2) / Math.PI);
+      if (ph !== this._stepPh) { this._stepPh = ph; Sound.play('step', 0.8); Effects.dust(p.pos[0], p.pos[1], p.pos[2], 1, 0.3); }
+    }
+  },
+
+  // Ljud i världen dämpas med avståndet.
+  sfx(name, pos) {
+    if (!pos) { Sound.play(name); return; }
+    const d = V3.dist(pos, this.player.pos);
+    if (d < 70) Sound.play(name, Math.max(0.15, 1 - d / 70));
   },
 
   showBanner(text, sub, color, time) {
@@ -243,12 +282,18 @@ const Game = {
     const env = this.env;
     env.retract[0] = p.pos[0]; env.retract[1] = p.pos[1]; env.retract[2] = p.pos[2];
     Storm.applyEnv(env, env.base);
+    // Röd blixt vid skada och puls när livet är lågt.
+    if (this.hurtFlash > 0) this.hurtFlash -= this.frameDt || 0.016;
+    const low = p.alive && p.hp < p.stats.maxHp * 0.25 ? 0.12 + 0.08 * Math.sin(this.realTime * 6) : 0;
+    const red = Math.max(Math.max(0, this.hurtFlash || 0) * 0.45, low);
+    if (red > env.overlay[3]) { env.overlay[0] = 0.75; env.overlay[1] = 0.08; env.overlay[2] = 0.05; env.overlay[3] = red; }
     Renderer.begin(Camera, env, this.realTime);
     World.draw(Camera);
     Pickups.draw(this);
     Storm.draw(this);
     Bosses.draw(this);
     Abilities.draw(this);
+    Spren.draw(this);
     Enemies.draw(this);
     Projectiles.draw(this);
     p.draw(this);
@@ -258,7 +303,7 @@ const Game = {
     if (p.light > 1) {
       const c = p.center(this._c);
       const k = p.light / p.stats.maxLight;
-      Renderer.light(c[0], c[1], c[2], 0.12 + 0.18 * k, 0.17 + 0.25 * k, 0.25 + 0.35 * k, 4 + k * 4);
+      Renderer.light(c[0], c[1], c[2], 0.06 + 0.1 * k, 0.09 + 0.14 * k, 0.14 + 0.2 * k, 3 + k * 3);
     }
     Renderer.render(p.pos);
     this.drawHud();
@@ -374,20 +419,23 @@ const Game = {
   },
 
   // --- Händelser (fylls på i senare steg) ---
-  onLash(p) {
+  onLash(p, more) {
+    Sound.play(more ? 'lashMore' : 'lash');
     const c = p.center(this._c);
     Effects.burst(c[0], c[1], c[2], [0.85, 0.95, 1], 18, 5, 0.5, 0.1);
   },
-  onLashFail() {},
-  onLashReset() {},
-  onLightOut() {},
+  onLashFail() { Sound.play('fail'); Spren.say('Du har för lite Stormlight. Andas in från sfärerna!', 3); },
+  onLashReset() { Sound.play('lashReset'); },
+  onLightOut() { Sound.play('fail'); Spren.say('Ditt Stormlight tog slut – du faller!', 3); },
   onDash(p) {
+    Sound.play('dash');
     const c = p.center(this._c);
     Effects.burst(c[0], c[1], c[2], [0.85, 0.95, 1], 24, 6, 0.4, 0.1);
   },
-  onJump() {},
+  onJump() { Sound.play('jump'); },
   onSlam(p, speed) {
     p.landT = Math.min(1, speed / 40);
+    Sound.play(speed > 40 ? 'slam' : 'land');
     Effects.dust(p.pos[0], p.pos[1], p.pos[2], 16, 2.5);
     Effects.shake(Math.min(0.7, speed / 60));
     // Nedslaget skadar och knuffar fiender runt omkring.
@@ -407,47 +455,60 @@ const Game = {
     Effects.burst(c[0], c[1], c[2], [1, 0.45, 0.3], 10, 4, 0.5, 0.08, { add: false, grav: 6 });
     Effects.shake(0.3);
     this.stats.taken += dmg;
+    Sound.play('hurt');
+    Spren.painspren(p.pos[0], p.pos[1], p.pos[2]);
+    this.hurtFlash = 0.5;
   },
   onPlayerDeath() {},
-  onSwing() {},
+  onSwing(sw) { Sound.play(sw.combo === 2 ? 'swingHeavy' : 'swing'); },
   onCarveHit(pr, x, y, z) { Effects.debris(x, y, z, [0.62, 0.5, 0.4], 6, 4); Effects.shake(0.05); },
   onCarve(pr) {
+    Sound.play('crumble');
     for (let k = 0; k < 6; k++) Effects.debris(pr.cx + rand(-1, 1), lerp(pr.y0, pr.y1, k / 6), pr.cz + rand(-1, 1), [0.6, 0.48, 0.38], 10, 6);
     Effects.dust(pr.cx, pr.y0 + 0.5, pr.cz, 20, 3);
     Effects.shake(0.25);
   },
-  onParry(b) { Effects.sparks(b.pos[0], b.pos[1], b.pos[2], -b.vel[0] * 0.03, 0.3, -b.vel[2] * 0.03, 0.5, [1, 0.9, 0.6], 10, 6); },
+  onParry(b) {
+    Sound.play('parry'); Effects.sparks(b.pos[0], b.pos[1], b.pos[2], -b.vel[0] * 0.03, 0.3, -b.vel[2] * 0.03, 0.5, [1, 0.9, 0.6], 10, 6); },
   onBlocked(e) {
     const c = Enemies.center(e, this._c);
     Effects.sparks(c[0] + Math.sin(e.yaw) * 0.7, c[1], c[2] + Math.cos(e.yaw) * 0.7, Math.sin(e.yaw), 0.3, Math.cos(e.yaw), 0.6, [1, 0.85, 0.5], 14, 7);
     Effects.text(c[0], c[1] + 1.2, c[2], 'Blockerat', '#ffd27a', 14);
+    Sound.play('clang');
   },
   onEnemyAlert() {},
   onEnemySeen() {},
-  onEnemyWindup() {},
+  onEnemyWindup(e) { Spren.anticipation(e); },
   onEnemyStrike() {},
-  onEnemyShoot() {},
-  onThunderCharge() {},
-  onBeam(e, x, y, z) { Effects.sparks(x, y, z, 0, 1, 0, 1, [1, 0.3, 0.45], 14, 6); Effects.shake(0.12); },
-  onBruteSlam(e) { Effects.dust(e.pos[0], e.pos[1], e.pos[2], 24, 3); Effects.shake(0.4); },
-  onEnemyHit(e, dmg) {
+  onEnemyShoot(e) { this.sfx('arrow', e.pos); },
+  onThunderCharge(e) { Spren.anticipation(e); this.sfx('thunderCharge', e.pos); },
+  onBeam(e, x, y, z) {
+    this.sfx('redBolt', e.pos); Effects.sparks(x, y, z, 0, 1, 0, 1, [1, 0.3, 0.45], 14, 6); Effects.shake(0.12); },
+  onBruteSlam(e) {
+    this.sfx('bossSlam', e.pos); Effects.dust(e.pos[0], e.pos[1], e.pos[2], 24, 3); Effects.shake(0.4); },
+  onEnemyHit(e, dmg, source) {
+    Sound.play(e.def.plated || e.type === 'brute' || (e.boss && e.bossType === 'thunderclast') ? 'clang' : 'hit');
     const c = Enemies.center(e, this._c);
     Effects.burst(c[0], c[1], c[2], [0.9, 0.97, 1], 8, 5, 0.3, 0.06);
     Effects.text(c[0], c[1] + e.h * 0.6, c[2], String(Math.round(dmg)), '#fff4d6', 15);
   },
-  onDrawLight(o) { Effects.burst(o.pos[0], o.pos[1], o.pos[2], GEMS[o.gem].c, 6, 1.5, 0.5, 0.05); },
-  onSphereTaken(o) { this.stats.wealth += o.value; },
+  onDrawLight(o) {
+    Sound.play('draw'); Effects.burst(o.pos[0], o.pos[1], o.pos[2], GEMS[o.gem].c, 6, 1.5, 0.5, 0.05); },
+  onSphereTaken(o) { this.stats.wealth += o.value; Sound.play('sphere'); },
   onItem(o) {
     const p = this.player;
     const c = p.center(this._c);
     if (o.kind === 'gemheart') {
       this.stats.gemhearts++;
+      Sound.play('gemheart');
+      Spren.glory = 6;
       p.addLight(p.stats.maxLight);
       Effects.burst(c[0], c[1], c[2], [0.4, 1, 0.65], 40, 6, 1, 0.12);
       if (this.bossSpawned && !Bosses.boss && !this.complete) this.stageComplete();
       else this.showBanner('Gemheart', 'Stormlight fyller dig', '#9dffc8', 2.5);
     } else if (o.kind === 'knobweed') {
       p.hp = Math.min(p.stats.maxHp, p.hp + 35);
+      Sound.play('heal');
       Effects.text(c[0], c[1] + 1, c[2], '+35', '#9be37a', 18);
     }
   },
@@ -458,6 +519,8 @@ const Game = {
     const p = this.player;
     const c = p.center(this._c);
     if (ideal) {
+      Sound.play('ideal');
+      Spren.glory = 10;
       this.showBanner(ideal.title + ': \u201d' + ideal.words + '\u201d', 'Orden accepteras. Nytt: ' + ideal.grants, '#bfe6ff', 6);
       Effects.burst(c[0], c[1], c[2], [0.85, 0.95, 1], 120, 14, 1.5, 0.14);
       Effects.shake(0.5);
@@ -465,25 +528,31 @@ const Game = {
     this.completeTimer = 7;
   },
 
-  onStormWarning() { this.showBanner('Highstormen närmar sig!', 'Sök lä på klippornas västra sida', '#dbe7ff', 4); },
+  onStormWarning() {
+    Sound.play('stormHorn');
+    Spren.say('Hör du hornen? Highstormen kommer – hitta lä!', 4); this.showBanner('Highstormen närmar sig!', 'Sök lä på klippornas västra sida', '#dbe7ff', 4); },
   onStormStart() { Effects.shake(0.3); },
   onStormEnd() { this.showBanner('Stormen har passerat', 'Sfärerna glöder igen', '#f3e6c8', 3); },
-  onLightning() { Effects.shake(0.12); },
-  onBossSpawn(e, def) { this.showBanner(def.name, def.title, '#f0c070', 4); Effects.shake(0.5); },
+  onLightning() { Effects.shake(0.12); Sound.play('thunder', 0.8); },
+  onBossSpawn(e, def) {
+    Sound.play('bossSpawn'); this.showBanner(def.name, def.title, '#f0c070', 4); Effects.shake(0.5); },
   onBossPhase(e) { Effects.shake(0.6); this.showBanner(BOSS_DEFS[e.bossType].name + ' rasar!', '', '#ff9a7a', 2); },
-  onBossWindup() {},
-  onBossRoar(e) { Effects.shake(0.4); },
+  onBossWindup(e) { if (e.bossType !== 'herald') Spren.anticipation(e); },
+  onBossRoar(e) { Effects.shake(0.4); Sound.play('roar'); },
   onBossEmerge(e) { Effects.shake(0.6); Effects.dust(e.pos[0], e.pos[1], e.pos[2], 40, 6); },
   onBossBite() {},
-  onBossSlam() {},
-  onBossThrow() {},
-  onBossCurse() {},
+  onBossSlam() { Sound.play('bossSlam'); },
+  onBossThrow() { Sound.play('swingHeavy'); },
+  onBossCurse() { Sound.play('thunderCharge'); },
   onCursed(p) { const c = p.center(this._c); Effects.burst(c[0], c[1], c[2], [0.9, 0.3, 1], 30, 6, 0.8, 0.1); this.showBanner('Din gravitation har Lashats!', 'Tryck Q för att ta tillbaka den', '#e0a0ff', 2); },
   onLocked(key) { this.showBanner('Ej upplåst ännu', 'Svär fler Ideal för att låsa upp förmågan', '#d8c8a8', 1.6); },
-  onFullLashing(c, n) { Effects.burst(c[0], c[1] - 0.8, c[2], [0.85, 0.95, 1], 50, 12, 0.6, 0.12); Effects.shake(0.3); },
-  onLashEnemy(e) { const c = Enemies.center(e, this._c); Effects.burst(c[0], c[1], c[2], [0.85, 0.95, 1], 24, 5, 0.5, 0.1); },
-  onSpear() {},
-  onWindCall(t) { Effects.dust(t.x, t.y, t.z, 30, 4); },
+  onFullLashing(c, n) {
+    Sound.play('full'); Effects.burst(c[0], c[1] - 0.8, c[2], [0.85, 0.95, 1], 50, 12, 0.6, 0.12); Effects.shake(0.3); },
+  onLashEnemy(e) {
+    Sound.play('lash'); const c = Enemies.center(e, this._c); Effects.burst(c[0], c[1], c[2], [0.85, 0.95, 1], 24, 5, 0.5, 0.1); },
+  onSpear() { Sound.play('spear'); },
+  onWindCall(t) {
+    Sound.play('wind'); Effects.dust(t.x, t.y, t.z, 30, 4); },
   onArmorHit(p) { const c = p.center(this._c); Effects.burst(c[0], c[1], c[2], [0.7, 0.85, 1], 16, 4, 0.4, 0.08); },
   startEverstorm() { Storm.startEverstorm(); this.showBanner('Everstormen!', 'Sök lä på klippornas östra sida', '#ff7a7a', 3.5); },
   onBossKilled(e) {
@@ -498,11 +567,14 @@ const Game = {
     for (let k = 0; k < 8; k++) Pickups.spawnSphere(gx + rand(-4, 4), ar.y1 + 1, gz + rand(-4, 4), randInt(0, 2), true, true);
     Bosses.boss = null;
     Storm.red = 0;
+    Sound.play('crumble');
+    Spren.glory = 8;
     this.stats.bosses = (this.stats.bosses || 0) + 1;
     this.showBanner(BOSS_DEFS[e.bossType].name + ' besegrad', 'Ta dess gemheart', '#f0d890', 4);
   },
   onEnemyKilled(e) {
     Pickups.dropFromEnemy(e);
+    this.sfx('kill', e.pos);
     const c = Enemies.center(e, this._c);
     Effects.burst(c[0], c[1], c[2], [0.85, 0.95, 1], 26, 6, 0.8, 0.1);
     Effects.debris(c[0], c[1], c[2], e.type === 'brute' ? [0.48, 0.4, 0.34] : [0.3, 0.22, 0.2], e.type === 'brute' ? 26 : 12, 5);
