@@ -1,0 +1,32 @@
+:root {
+  --ink: #2b2118;
+  --ink-soft: #5a4a3a;
+  --parchment: #efe2c4;
+  --parchment-dark: #dcc9a2;
+  --glow: #dff3ff;
+  --glow-blue: #8fd0ff;
+  --gold: #c9a046;
+  --rust: #a8552f;
+  --night: #121a24;
+}
+* { box-sizing: border-box; }
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--night);
+  color: var(--parchment);
+  font-family: Georgia, "Times New Roman", serif;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+canvas#game {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
+  cursor: crosshair;
+}

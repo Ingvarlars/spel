@@ -104,3 +104,53 @@ våg, bossar och skada) nås med mus, tangentbord eller touch. I inställningarn
 du ändra ljud, volym, skärmskakning, skadesiffror, mängd partiklar och visa FPS.
 Rekord, total statistik och inställningar sparas i webbläsarens `localStorage`.
 Om lagringen är avstängd fungerar spelet ändå, men inget sparas.
+
+## Stormvandrare
+
+Ett stort 2D-actionspel från sidan i mappen `stormvandrare/`. Det är ett fristående
+projekt med egna namn, figurer, texter och egen grafik. Spelet är inspirerat av episk
+fantasy och dess konst, men har ingen koppling till någon författare eller något
+förlag.
+
+Du är en stenhuggarlärling som under en urstorm knyts samman med vindväsenet
+**Lirra**. Bandet ger dig **stormglöd** – ljus som läker dig och låter dig ändra din
+egen gravitation (**fallbindning**), framkalla en **glödklinga** och svära nya
+**eder** som väcker starkare förmågor. Ta dig över Klyftslätterna och vidare, sök lä
+när urstormen drar fram och besegra bestarna som vaktar regionerna.
+
+### Arkitektur (plan)
+
+Vanlig HTML, CSS och JavaScript med `<canvas>`, inga bibliotek och vanliga
+`<script>`-taggar (fungerar via `file://` och GitHub Pages). Spelet delar ingen kod
+med de andra spelen.
+
+| Fil | Ansvar |
+| --- | --- |
+| `js/utils.js` | Matte, deterministisk slump, `Pool` (object pooling), konstanter |
+| `js/storage.js` | Sparfil: kampanjframsteg, färdigheter, rekord, prestationer och inställningar (tysta fel) |
+| `js/input.js` | Tangentbord, mus, handkontroll (Gamepad API) och pekskärm |
+| `js/audio.js` | Ljudeffekter med Web Audio API |
+| `js/music.js` | Procedurell musik (drönare, melodi och trummor som skiftar med läget) |
+| `js/world.js` | Procedurgenererade banor (rutnät), kollision, terräng i förrenderade bitar, målad parallaxbakgrund och växter som drar sig undan |
+| `js/regions.js` | Kampanjen: regioner, etapper, berättelse och Lirras repliker |
+| `js/player.js` | Stormvandraren: rörelse relativt egen gravitation, fallbindning, stormglöd och läkning |
+| `js/abilities.js` | Glödklinga (kombo, skär löst berg), kastspjut, helbindning, glödrustning och stormkallelse |
+| `js/enemies.js` | Fiendetyper och deras beteenden |
+| `js/bosses.js` | Bossar med flera faser |
+| `js/storm.js` | Urstormen: varning, stormmur, vind, lä bakom klippor, flygande bråte och laddning av glödstenar |
+| `js/pickups.js` | Glödstenar (laddade och slocknade), kärnstenar och helande örter |
+| `js/progression.js` | Eder, uppgraderingar under en etapp, färdighetsträd i lägret och prestationer |
+| `js/codex.js` | Bestiarie och anteckningar som en skissbok med procedurella bläckteckningar |
+| `js/effects.js` | Partiklar, väsen (små ljusvarelser), skadesiffror och skärmskakning |
+| `js/ui.js` | HUD, minikarta, menyer och skissboksgränssnitt |
+| `js/game.js` | Spel-loop med fast tidssteg, tillstånd, kamera och samordning |
+
+**Konststil:** målerisk himmel med dramatiskt ljus och diset djup, varma
+sandstensplatåer och kallt blåvitt glöd. Menyerna ser ut som en forskares skissbok
+med pergament, bläck och egna glyfliknande emblem.
+
+**Byggordning:** (1) bana, rörelse, fallbindning och kamera, (2) glödklinga och
+fiender, (3) stormglöd, glödstenar och urstorm, (4) bossar, etapper och eder,
+(5) effekter, väsen, ljud och musik, (6) kampanj, karta, läger och färdighetsträd,
+(7) menyer, skissbok och sparning, (8) mobil och handkontroll, (9) balans och
+finputs.
