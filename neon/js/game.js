@@ -1,12 +1,13 @@
 'use strict';
 // Spel-loop med fast tidssteg, kamera, tillstånd och samordning av alla system.
+// Tillstånd: menu → playing ⇄ paused / levelup → gameover → playing/menu.
 
 const Game = {
   canvas: null,
   ctx: null,
   w: 0, h: 0, dpr: 1, zoom: 1,
   cam: { x: WORLD_W / 2, y: WORLD_H / 2 },
-  state: 'playing',
+  state: 'menu',
   time: 0,
   realTime: 0,
   acc: 0,
@@ -16,9 +17,11 @@ const Game = {
   weapons: [],
   vt: { s: 1, tx: 0, ty: 0 }, // aktuell vy-transform
   stats: null,
+  settings: null,
   waveMods: null,
   tick: 0,
   hurtVignette: 0,
+  deathTimer: 0,
   boss: null,
   banner: null,
   level: 1,
@@ -27,26 +30,44 @@ const Game = {
   wave: 0,
   pendingLevels: 0,
   choices: null,
+  subScreen: null,
 
   init() {
     this.canvas = document.getElementById('game');
     this.ctx = this.canvas.getContext('2d', { alpha: false });
     window.addEventListener('resize', () => this.resize());
     this.resize();
-    Input.init();
+    Storage.load();
+    this.settings = Storage.data.settings;
+    this.applySettings();
+    Input.init(this.canvas);
     UI.init();
+
     // Ljud kräver en användarhändelse innan det får spelas.
     const unlock = () => Sound.unlock();
     window.addEventListener('keydown', unlock);
     window.addEventListener('pointerdown', unlock);
+
     Input.on('mute', () => this.toggleMute());
-    const muteBtn = document.getElementById('btn-mute');
-    muteBtn.addEventListener('click', (e) => { e.stopPropagation(); this.toggleMute(); muteBtn.blur(); });
+    Input.on('pause', () => this.onPauseKey());
+    Input.on('blur', () => this.pause());
+    document.addEventListener('visibilitychange', () => { if (document.hidden) this.pause(); });
     Input.on('choose1', () => this.chooseUpgrade(0));
     Input.on('choose2', () => this.chooseUpgrade(1));
     Input.on('choose3', () => this.chooseUpgrade(2));
-    this.newGame();
+
+    const muteBtn = document.getElementById('btn-mute');
+    muteBtn.addEventListener('click', (e) => { e.stopPropagation(); this.toggleMute(); muteBtn.blur(); });
+    const pauseBtn = document.getElementById('btn-pause');
+    pauseBtn.addEventListener('click', (e) => { e.stopPropagation(); this.pause(); pauseBtn.blur(); });
+
+    this.showMenu();
     requestAnimationFrame((t) => { this.last = t; this.loop(t); });
+  },
+
+  setState(s) {
+    this.state = s;
+    document.body.setAttribute('data-state', s);
   },
 
   resize() {
@@ -59,15 +80,119 @@ const Game = {
     this.zoom = clamp(Math.min(this.w, this.h) / 720, 0.55, 1);
   },
 
+  // --- Inställningar ---
+  applySettings() {
+    const st = this.settings;
+    Sound.setMuted(!st.sound);
+    Sound.setVolume(st.volume);
+    Effects.settings.shake = st.shake;
+    Effects.settings.numbers = st.numbers;
+    Effects.settings.particles = st.particles === 'low' ? 0.4 : 1;
+    this.updateMuteButton();
+  },
+
+  changeSetting(key, value) {
+    this.settings[key] = value;
+    this.applySettings();
+    Storage.save();
+    if (key === 'sound' && value) { Sound.unlock(); Sound.play('select'); }
+  },
+
+  // --- Skärmar ---
+  showMenu() {
+    this.newGame(); // rensa banan bakom menyn
+    this.setState('menu');
+    this.subScreen = null;
+    UI.showMenu(Storage.data, {
+      play: () => this.startGame(),
+      settings: () => this.openSettings(() => this.showMenu()),
+      stats: () => this.openStats(),
+    });
+  },
+
+  openSettings(back) {
+    this.subScreen = back;
+    UI.showSettings(this.settings, (k, v) => this.changeSetting(k, v), () => { this.subScreen = null; back(); });
+  },
+
+  openStats() {
+    UI.showStats(Storage.data, {
+      back: () => this.showMenu(),
+      reset: () => { Storage.resetStats(); this.openStats(); },
+    });
+  },
+
+  startGame() {
+    Sound.unlock();
+    this.newGame();
+    UI.hide();
+    this.setState('playing');
+    this.acc = 0;
+  },
+
+  showPause() {
+    UI.showPause({
+      resume: () => this.resume(),
+      settings: () => this.openSettings(() => this.showPause()),
+      restart: () => this.startGame(),
+      quit: () => this.showMenu(),
+    });
+  },
+
+  pause() {
+    if (this.state !== 'playing' || !this.player.alive) return;
+    this.setState('paused');
+    this.showPause();
+  },
+
+  resume() {
+    if (this.state !== 'paused') return;
+    this.subScreen = null;
+    UI.hide();
+    this.setState('playing');
+    this.acc = 0;
+  },
+
+  onPauseKey() {
+    if (this.state === 'playing') this.pause();
+    else if (this.state === 'paused') {
+      if (this.subScreen) { const back = this.subScreen; this.subScreen = null; back(); }
+      else this.resume();
+    } else if (this.state === 'menu' && this.subScreen) {
+      const back = this.subScreen; this.subScreen = null; back();
+    }
+  },
+
+  gameOver() {
+    const run = {
+      time: Math.floor(this.time),
+      kills: this.stats.kills,
+      level: this.level,
+      wave: this.wave,
+      bosses: this.stats.bosses,
+      damage: this.stats.damage,
+    };
+    const records = Storage.recordRun(run);
+    this.setState('gameover');
+    Sound.play('gameOver');
+    UI.showGameOver(run, records, {
+      restart: () => this.startGame(),
+      menu: () => this.showMenu(),
+    });
+  },
+
   newGame() {
     this.time = 0;
+    this.tick = 0;
     this.player.reset();
     Enemies.reset();
     Weapons.reset();
     Pickups.reset();
     Effects.reset();
-    this.hurtVignette = 0;
     Upgrades.reset();
+    Director.reset();
+    this.hurtVignette = 0;
+    this.deathTimer = 0;
     this.level = 1;
     this.xp = 0;
     this.xpNext = Levels.xpForLevel(1);
@@ -75,42 +200,47 @@ const Game = {
     this.choices = null;
     this.weapons = [];
     this.addWeapon('blaster');
-    this.stats = { kills: 0, damage: 0 };
+    this.stats = { kills: 0, damage: 0, bosses: 0 };
     this.boss = null;
     this.banner = null;
     this.wave = 0;
-    Director.reset();
     this.cam.x = this.player.x;
     this.cam.y = this.player.y;
-    this.state = 'playing';
   },
 
   loop(t) {
     let frame = (t - this.last) / 1000;
     this.last = t;
     if (frame > 0.25) frame = 0.25; // t.ex. efter att fliken varit dold
+    if (frame < 0) frame = 0;
     this.realTime += frame;
     if (frame > 0) this.fps += (1 / frame - this.fps) * 0.05;
 
     if (this.state === 'playing') {
       this.acc += frame;
       let steps = 0;
-      while (this.acc >= STEP && steps < 8) {
+      while (this.acc >= STEP && steps < 8 && this.state === 'playing') {
         this.update(STEP);
         this.acc -= STEP;
         steps++;
       }
       if (steps === 8) this.acc = 0;
+    } else if (this.state === 'menu') {
+      // Långsam kameradrift bakom startmenyn.
+      this.cam.x = WORLD_W / 2 + Math.cos(this.realTime * 0.05) * 900;
+      this.cam.y = WORLD_H / 2 + Math.sin(this.realTime * 0.07) * 700;
+    } else if (this.state === 'gameover') {
+      Effects.update(frame);
     }
     this.render();
     requestAnimationFrame((tt) => this.loop(tt));
   },
 
   update(dt) {
-    this.time += dt;
+    const p = this.player;
+    if (p.alive) this.time += dt;
     this.tick++;
     if (this.hurtVignette > 0) this.hurtVignette -= dt;
-    const p = this.player;
     p.update(dt, this);
 
     Director.update(dt, this);
@@ -119,7 +249,7 @@ const Game = {
       if (this.banner.t <= 0) this.banner = null;
     }
     Enemies.update(dt, this);
-    Weapons.update(dt, this);
+    if (p.alive) Weapons.update(dt, this);
     Pickups.update(dt, this);
     Effects.update(dt);
 
@@ -128,7 +258,6 @@ const Game = {
       const bx = p.x - Math.cos(p.angle) * 10, by = p.y - Math.sin(p.angle) * 10;
       Effects.particle(bx, by, -Math.cos(p.angle) * 80 + rand(-20, 20), -Math.sin(p.angle) * 80 + rand(-20, 20), p.dashing ? 0.4 : 0.25, p.dashing ? 4 : 2.5, p.dashing ? '#ffffff' : PLAYER_COLOR, 4);
     }
-    if (this.pendingLevels > 0) this.openLevelUp();
 
     // Kameran följer spelaren mjukt och hålls inom banan.
     const k = 1 - Math.exp(-8 * dt);
@@ -137,6 +266,13 @@ const Game = {
     const hw = this.w / 2 / this.zoom, hh = this.h / 2 / this.zoom;
     this.cam.x = WORLD_W > hw * 2 ? clamp(this.cam.x, hw - 80, WORLD_W - hw + 80) : WORLD_W / 2;
     this.cam.y = WORLD_H > hh * 2 ? clamp(this.cam.y, hh - 80, WORLD_H - hh + 80) : WORLD_H / 2;
+
+    if (!p.alive) {
+      this.deathTimer -= dt;
+      if (this.deathTimer <= 0) this.gameOver();
+    } else if (this.pendingLevels > 0) {
+      this.openLevelUp();
+    }
   },
 
   // Synligt område i världskoordinater (med marginal).
@@ -209,8 +345,7 @@ const Game = {
 
   toggleMute() {
     Sound.unlock();
-    Sound.toggleMute();
-    this.updateMuteButton();
+    this.changeSetting('sound', !this.settings.sound);
   },
 
   updateMuteButton() {
@@ -231,7 +366,7 @@ const Game = {
   },
 
   openLevelUp() {
-    this.state = 'levelup';
+    this.setState('levelup');
     this.choices = Upgrades.roll(this, 3);
     this.onLevelUp();
     UI.showLevelUp(this.choices, this.level - this.pendingLevels + 1, (i) => this.chooseUpgrade(i));
@@ -245,7 +380,8 @@ const Game = {
     if (this.pendingLevels > 0) this.openLevelUp();
     else {
       UI.hide();
-      this.state = 'playing';
+      this.setState('playing');
+      this.acc = 0;
     }
   },
 
@@ -286,7 +422,7 @@ const Game = {
     Effects.shake(1);
     Sound.play('bigExplosion');
     this.boss = null;
-    this.stats.bosses = (this.stats.bosses || 0) + 1;
+    this.stats.bosses++;
     Pickups.dropXp(b.x, b.y, 60 + 40 * b.level);
     Pickups.spawn('heart', b.x + 20, b.y);
     Pickups.spawn('magnet', b.x - 20, b.y);
@@ -320,7 +456,7 @@ const Game = {
     ctx.globalCompositeOperation = 'lighter';
     Weapons.draw(ctx, this, vt);
     ctx.globalCompositeOperation = 'source-over';
-    this.player.draw(ctx, this.realTime);
+    if (this.state !== 'menu') this.player.draw(ctx, this.realTime);
     Effects.draw(ctx, this);
     Effects.drawTexts(ctx);
 
@@ -342,7 +478,7 @@ const Game = {
       ctx.fillRect(0, 0, this.w, this.h);
       ctx.globalAlpha = 1;
     }
-    UI.drawHUD(ctx, this);
+    if (this.state !== 'menu') UI.drawHUD(ctx, this);
   },
 
   drawBackground(ctx) {
@@ -396,6 +532,7 @@ const Game = {
     Sound.play('hurt');
   },
   onPlayerDeath(p) {
+    this.deathTimer = 1.8;
     Effects.burst(p.x, p.y, PLAYER_COLOR, 80, 500, 1.2, 4);
     Effects.burst(p.x, p.y, '#ffffff', 40, 300, 0.8, 3);
     Effects.ring(p.x, p.y, 220, PLAYER_COLOR, 0.8, 6);

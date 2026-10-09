@@ -26,6 +26,137 @@ const UI = {
     this.root.classList.remove('open');
   },
 
+  // Kopplar knappar med data-action till funktioner och fokuserar den första.
+  bind(el, actions) {
+    const btns = el.querySelectorAll('[data-action]');
+    for (let i = 0; i < btns.length; i++) {
+      btns[i].addEventListener('click', (e) => {
+        e.preventDefault();
+        Sound.unlock();
+        Sound.play('select');
+        const fn = actions[btns[i].dataset.action];
+        if (fn) fn();
+      });
+    }
+    const first = el.querySelector('button');
+    if (first) first.focus({ preventScroll: true });
+  },
+
+  // --- Startmeny ---
+  showMenu(save, actions) {
+    const b = save.best;
+    const rec = b.time > 0
+      ? '<p class="record">Rekord: <b>' + formatTime(b.time) + '</b> · ' + b.kills + ' fiender · nivå ' + b.level + ' · våg ' + b.wave + '</p>'
+      : '<p class="record">Inget rekord ännu – hur länge klarar du dig?</p>';
+    const el = this.show('menu',
+      '<h1 class="title">NEON<br><span>ÖVERLEVARE</span></h1>' + rec +
+      '<div class="menu-buttons">' +
+      '<button class="btn primary" data-action="play">▶ Spela</button>' +
+      '<button class="btn" data-action="settings">⚙ Inställningar</button>' +
+      '<button class="btn" data-action="stats">★ Rekord &amp; statistik</button>' +
+      '</div>' +
+      '<div class="help">' +
+      '<p><b>Dator:</b> WASD / piltangenter styr · Mellanslag = dash · Esc = paus · M = ljud</p>' +
+      '<p><b>Mobil:</b> dra med tummen för att styra · tryck på DASH-knappen</p>' +
+      '<p>Skeppet skjuter automatiskt. Plocka XP-kristaller, välj uppgraderingar och överlev vågorna. Var 5:e våg kommer en boss.</p>' +
+      '</div>' +
+      '<p class="back-link"><a href="../index.html">← Tillbaka till Snake</a></p>');
+    this.bind(el, actions);
+  },
+
+  // --- Paus ---
+  showPause(actions) {
+    const el = this.show('pause',
+      '<h2 class="glow">PAUS</h2>' +
+      '<div class="menu-buttons">' +
+      '<button class="btn primary" data-action="resume">▶ Fortsätt</button>' +
+      '<button class="btn" data-action="settings">⚙ Inställningar</button>' +
+      '<button class="btn" data-action="restart">↻ Starta om</button>' +
+      '<button class="btn" data-action="quit">⌂ Avsluta till menyn</button>' +
+      '</div><p class="sub small">Tryck Esc för att fortsätta</p>');
+    this.bind(el, actions);
+  },
+
+  // --- Game over ---
+  showGameOver(run, records, actions) {
+    const row = (label, value, key) =>
+      '<div class="stat"><span>' + label + '</span><b>' + value + '</b>' + (records[key] ? '<em>Nytt rekord!</em>' : '') + '</div>';
+    const any = Object.keys(records).length > 0;
+    const el = this.show('gameover',
+      '<h2 class="glow red">GAME OVER</h2>' +
+      (any ? '<p class="sub highlight">Du slog ett personligt rekord!</p>' : '<p class="sub">Farkosten förstördes</p>') +
+      '<div class="stats">' +
+      row('Tid överlevd', formatTime(run.time), 'time') +
+      row('Fiender dödade', run.kills, 'kills') +
+      row('Nivå', run.level, 'level') +
+      row('Våg', run.wave, 'wave') +
+      row('Bossar besegrade', run.bosses, '') +
+      row('Skada utdelad', Math.round(run.damage).toLocaleString('sv-SE'), '') +
+      '</div>' +
+      '<div class="menu-buttons">' +
+      '<button class="btn primary" data-action="restart">↻ Spela igen</button>' +
+      '<button class="btn" data-action="menu">⌂ Huvudmeny</button>' +
+      '</div>');
+    this.bind(el, actions);
+  },
+
+  // --- Rekord och statistik ---
+  showStats(save, actions) {
+    const b = save.best, t = save.totals;
+    const row = (label, value) => '<div class="stat"><span>' + label + '</span><b>' + value + '</b></div>';
+    const el = this.show('stats',
+      '<h2 class="glow">REKORD</h2>' +
+      '<div class="stats">' +
+      row('Längsta tid', formatTime(b.time)) + row('Flest fiender', b.kills) +
+      row('Högsta nivå', b.level) + row('Högsta våg', b.wave) +
+      '</div><h3>Totalt</h3><div class="stats">' +
+      row('Spelade rundor', t.games) + row('Fiender dödade', t.kills.toLocaleString('sv-SE')) +
+      row('Speltid', formatTime(t.time)) + row('Bossar besegrade', t.bosses) +
+      '</div><div class="menu-buttons">' +
+      '<button class="btn primary" data-action="back">← Tillbaka</button>' +
+      '<button class="btn danger" data-action="reset">Nollställ statistik</button>' +
+      '</div>');
+    this.bind(el, Object.assign({}, actions, {
+      reset: () => {
+        if (window.confirm('Vill du nollställa alla rekord och all statistik?')) actions.reset();
+      },
+    }));
+  },
+
+  // --- Inställningar ---
+  showSettings(settings, onChange, onBack) {
+    const check = (key, label) =>
+      '<label class="setting"><span>' + label + '</span><input type="checkbox" data-key="' + key + '"' + (settings[key] ? ' checked' : '') + '></label>';
+    const el = this.show('settings',
+      '<h2 class="glow">INSTÄLLNINGAR</h2>' +
+      '<div class="settings">' +
+      check('sound', 'Ljud') +
+      '<label class="setting"><span>Volym</span><input type="range" min="0" max="100" step="5" data-key="volume" value="' + Math.round(settings.volume * 100) + '"></label>' +
+      check('shake', 'Skärmskakning') +
+      check('numbers', 'Skadesiffror') +
+      '<label class="setting"><span>Partiklar</span><select data-key="particles">' +
+      '<option value="high"' + (settings.particles === 'high' ? ' selected' : '') + '>Många</option>' +
+      '<option value="low"' + (settings.particles === 'low' ? ' selected' : '') + '>Få (snabbare)</option>' +
+      '</select></label>' +
+      check('showFps', 'Visa FPS') +
+      '</div><div class="menu-buttons"><button class="btn primary" data-action="back">← Tillbaka</button></div>');
+    const inputs = el.querySelectorAll('[data-key]');
+    for (let i = 0; i < inputs.length; i++) {
+      const inp = inputs[i];
+      const handler = () => {
+        const key = inp.dataset.key;
+        let v;
+        if (inp.type === 'checkbox') v = inp.checked;
+        else if (inp.type === 'range') v = Number(inp.value) / 100;
+        else v = inp.value;
+        onChange(key, v);
+      };
+      inp.addEventListener('input', handler);
+      inp.addEventListener('change', handler);
+    }
+    this.bind(el, { back: onBack });
+  },
+
   // --- Nivå upp ---
   showLevelUp(options, level, onPick) {
     let cards = '';
@@ -106,6 +237,13 @@ const UI = {
     ctx.font = '13px system-ui, sans-serif';
     ctx.fillStyle = '#8aa0c0';
     ctx.fillText('Nivå ' + game.level + '  ·  Våg ' + game.wave + '  ·  nästa om ' + Math.ceil(Director.timer) + ' s', w / 2, 52);
+
+    if (game.settings.showFps) {
+      ctx.textAlign = 'left';
+      ctx.fillStyle = '#8aa0c0';
+      ctx.font = '11px system-ui, sans-serif';
+      ctx.fillText(Math.round(game.fps) + ' fps · ' + Enemies.list.length + ' fiender · ' + Weapons.bullets.count + ' skott · ' + Effects.particles.count + ' partiklar', 16, h - 76);
+    }
 
     // Dödade fiender till höger.
     ctx.textAlign = 'right';

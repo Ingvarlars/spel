@@ -7,14 +7,16 @@
 <title>Neon Överlevare</title>
 <link rel="stylesheet" href="style.css">
 </head>
-<body>
+<body data-state="menu">
 <canvas id="game"></canvas>
 <div id="hud-buttons">
+  <button id="btn-pause" class="hud-btn" aria-label="Paus" title="Paus (Esc)">⏸</button>
   <button id="btn-mute" class="hud-btn" aria-label="Stäng av ljud" title="Ljud av/på (M)">🔊</button>
 </div>
 <div id="ui"></div>
 
 <script src="js/utils.js"></script>
+<script src="js/storage.js"></script>
 <script src="js/input.js"></script>
 <script src="js/audio.js"></script>
 <script src="js/effects.js"></script>
