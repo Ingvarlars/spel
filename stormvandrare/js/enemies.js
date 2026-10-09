@@ -208,7 +208,7 @@ const Enemies = {
     e.anim = rand(0, 10); e.elite = !!elite; e.mods = m; e.boss = false;
     e.home = home || World.plateauAt(x, z);
     e.turnTimer = 0; e.wallClimb = false; e.seen = false;
-    e.lash = 0; e.lashDir = null; e.lastSpeed = 0; e.pose = null; e.invulnerable = false;
+    e.lash = 0; e.lashDir = null; e.lastSpeed = 0; e.pose = null; e.invulnerable = false; e.guardian = false;
     return e;
   },
 

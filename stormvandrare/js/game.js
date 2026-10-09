@@ -45,7 +45,7 @@ const Game = {
     window.addEventListener('pointerdown', unlock);
     Input.on('mute', () => { Sound.muted = !Sound.muted; Sound.applyVolume(); });
     this.env = this.makeEnv(THEMES.plains);
-    this.startStage(1, 12345);
+    this.startStage();
     requestAnimationFrame((t) => { this.last = t; this.loop(t); });
   },
 
@@ -81,13 +81,21 @@ const Game = {
     };
   },
 
-  startStage(level, seed, ideal) {
-    this.level = level;
-    this.stageBoss = ['chasmfiend', 'thunderclast', 'heavenly', 'herald'][(level - 1) % 4];
+  startStage(seed) {
+    const cfg = this.stageCfg = Campaign.config();
+    const level = this.level = cfg.level;
+    this.stageBoss = cfg.boss;
     this.bossSpawned = false;
     this.complete = false;
-    Progression.reset(ideal || Progression.ideal);
-    World.generate({ level, length: 520 + level * 40, theme: THEMES.plains }, seed);
+    this.completeTimer = 0;
+    this.tutorialIdx = 0;
+    this.guardians = false;
+    this.goalGem = false;
+    this.seenTypes = this.seenTypes || {};
+    seed = seed === undefined ? (Math.random() * 1e9) | 0 : seed;
+    World.generate({ level, length: cfg.length, theme: cfg.theme }, seed);
+    this.env = this.makeEnv(cfg.theme);
+    if (Sound.ctx) Music.setKey(cfg.music[0], cfg.music[1]);
     this.time = 0;
     this.tick = 0;
     Effects.reset();
@@ -96,20 +104,24 @@ const Game = {
     Abilities.reset();
     Bosses.reset();
     this.stats = { kills: 0, damage: 0, taken: 0, wealth: 0, gemhearts: 0, stormTime: 0 };
-    this.mods = { hp: 1 + (level - 1) * 0.25, dmg: 1 + (level - 1) * 0.15, speed: 1 + Math.min(0.25, (level - 1) * 0.05) };
+    this.mods = { hp: 1 + (level - 1) * 0.28, dmg: 1 + (level - 1) * 0.16, speed: 1 + Math.min(0.25, (level - 1) * 0.05) };
     for (const s of World.spawns) Enemies.spawn(s.type, s.x, s.y, s.z, this.mods, s.elite, s.home);
     Pickups.reset();
     for (const s of World.sphereSpots) Pickups.spawnSphere(s.x, s.y, s.z, Math.random() < 0.12 ? 2 : Math.random() < 0.4 ? 1 : 0, !s.dun, false);
     for (const h of World.herbSpots) Pickups.spawnItem('knobweed', h.x, h.y, h.z, false);
-    Storm.reset(rand(70, 95), 125);
+    const sc = cfg.theme.storm || [70, 125];
+    Storm.reset(rand(sc[0], sc[0] + 25), sc[1]);
     this.banner = null;
     const p = this.player;
     p.reset();
     const st = World.start;
     p.spawnAt(st.cx, st.y1 + 0.05, st.cz);
+    this.stageStart = this.time;
     Progression.apply(p);
     p.light = p.stats.maxLight;
     Spren.reset(p);
+    this.showBanner(cfg.region.name, cfg.name, '#f3e6c8', 4);
+    if (!cfg.endless && cfg.stageIndex === 0 && !cfg.tutorial) Spren.say(cfg.region.intro[cfg.region.intro.length - 1], 7);
     // Titta österut (mot målet).
     V3.set(p.facing, 1, 0, 0);
     Camera.reset(V3.create(0, 1, 0), V3.create(1, 0, 0));
@@ -167,11 +179,72 @@ const Game = {
     const ar = World.arena;
     if (!this.bossSpawned && p.alive && Math.hypot(p.pos[0] - ar.cx, p.pos[2] - ar.cz) < ar.radius * 0.85 && p.pos[1] > ar.y1 - 2) {
       this.bossSpawned = true;
-      Bosses.spawn(this.stageBoss, this);
+      if (this.stageBoss) { Bosses.spawn(this.stageBoss, this); Spren.say(LIRRA.boss[this.stageBoss], 6); }
+      else this.reachedGoal();
     }
     if (this.completeTimer > 0) {
       this.completeTimer -= dt;
-      if (this.completeTimer <= 0) this.startStage(this.level + 1, (Math.random() * 1e9) | 0);
+      if (this.completeTimer <= 0) this.nextStage();
+    }
+    // Lirras handledning i första etappen.
+    if (this.stageCfg.tutorial && this.tutorialIdx < LIRRA.tutorial.length && this.time - this.stageStart >= LIRRA.tutorial[this.tutorialIdx][0]) {
+      Spren.say(LIRRA.tutorial[this.tutorialIdx][1], 8);
+      this.tutorialIdx++;
+    }
+    if (p.alive && p.hp < p.stats.maxHp * 0.25 && !this._lowSaid) { this._lowSaid = true; Spren.say(pick(LIRRA.lowHp), 3); }
+    if (p.hp > p.stats.maxHp * 0.5) this._lowSaid = false;
+    this.updateWeather(dt);
+  },
+
+  // Etapper utan boss: målet nås på arenan, där väktare och en gemheart väntar.
+  reachedGoal() {
+    const ar = World.arena;
+    const n = 3 + Math.floor(this.level);
+    const types = ['warrior', 'archer', 'shield', 'thunder', 'hover'];
+    for (let k = 0; k < n; k++) {
+      const a = (k / n) * TAU;
+      const t = types[k % Math.min(types.length, 2 + Math.floor(this.level))];
+      const e = Enemies.spawn(t, ar.cx + Math.cos(a) * 18, ar.y1 + (t === 'hover' ? 6 : 0.2), ar.cz + Math.sin(a) * 18, this.mods, k === 0, ar);
+      e.alert = true;
+      e.guardian = true;
+    }
+    this.guardians = true;
+    this.showBanner('Väktarna', 'Besegra dem för att ta platåns gemheart', '#f0c070', 3.5);
+  },
+
+  nextStage() {
+    const newRegion = Campaign.advance();
+    if (Campaign.finished) { this.showBanner('Stormen har tystnat', 'Du har besegrat Everstormens härold. Tack för att du spelade!', '#f0d890', 10); Campaign.finished = false; Campaign.region = 0; Campaign.stage = 0; }
+    this.startStage();
+    if (newRegion) Spren.say(this.stageCfg.region.intro[0], 8);
+  },
+
+  // Väder: damm, sporer, snö eller aska runt kameran.
+  updateWeather(dt) {
+    const w = this.stageCfg.theme.weather;
+    const c = Camera.pos;
+    const n = Math.random() < dt * 30 * Effects.settings.particles ? 1 : 0;
+    for (let i = 0; i < n; i++) {
+      const a = rand(0, TAU), r = rand(5, 22);
+      const x = c[0] + Math.cos(a) * r, y = c[1] + rand(-4, 12), z = c[2] + Math.sin(a) * r;
+      if (w === 'snow') Effects.particle(x, y, z, rand(-0.5, 0.5), -rand(1, 2), rand(-0.5, 0.5), 6, rand(0.04, 0.08), [1, 1, 1], 0.9, 0.2, 0, false);
+      else if (w === 'spores') Effects.particle(x, y - 6, z, rand(-0.2, 0.2), rand(0.1, 0.4), rand(-0.2, 0.2), 5, 0.05, [0.6, 1, 0.5], 0.8, 0.3, -0.02, true);
+      else if (w === 'ash') Effects.particle(x, y, z, rand(-1, 1), -rand(0.3, 0.8), rand(-1, 1), 6, rand(0.04, 0.08), Math.random() < 0.15 ? [1, 0.45, 0.2] : [0.25, 0.24, 0.27], 0.8, 0.2, 0, Math.random() < 0.15);
+      else Effects.particle(x, y, z, rand(-0.3, 0.3), rand(-0.1, 0.1), rand(-0.3, 0.3), 5, 0.03, [1, 0.9, 0.7], 0.5, 0.2, 0, true);
+    }
+    // Väktarna besegrade: gemhearten dyker upp.
+    if (this.guardians && !this.complete) {
+      let left = 0;
+      for (const e of Enemies.list) if (!e.dead && e.guardian) left++;
+      if (left === 0) {
+        this.guardians = false;
+        const ar = World.arena;
+        let gx = ar.cx, gz = ar.cz;
+        for (let k = 0; k < 30 && World.insideAny(gx, ar.y1 + 0.6, gz); k++) { gx += rand(-3, 3); gz += rand(-3, 3); }
+        Pickups.spawnItem('gemheart', gx, ar.y1, gz, false);
+        this.showBanner('Platån är fri', 'Ta gemhearten', '#f0d890', 3);
+        this.goalGem = true;
+      }
     }
   },
 
@@ -390,7 +463,20 @@ const Game = {
     ctx.textAlign = 'left';
     ctx.fillStyle = '#d4af4a';
     ctx.font = 'italic 13px Georgia';
-    ctx.fillText(IDEALS[Progression.ideal - 1].title + ' · Etapp ' + this.level, 20, 92);
+    ctx.fillText(IDEALS[Progression.ideal - 1].title + ' · ' + this.stageCfg.region.name + ' – ' + this.stageCfg.name, 20, 92);
+    // Lirras repliker.
+    if (Spren.lirra.speech) {
+      ctx.globalAlpha = Math.min(1, Spren.lirra.speechT * 2);
+      ctx.font = 'italic 16px Georgia';
+      ctx.textAlign = 'center';
+      const tw = Math.min(w - 40, ctx.measureText('Lirra: ' + Spren.lirra.speech).width + 40);
+      ctx.fillStyle = 'rgba(16,22,34,0.6)';
+      ctx.fillRect(w / 2 - tw / 2, h - 132, tw, 34);
+      ctx.fillStyle = '#d8ecff';
+      ctx.fillText('Lirra: ' + Spren.lirra.speech, w / 2, h - 110, w - 60);
+      ctx.globalAlpha = 1;
+      ctx.textAlign = 'left';
+    }
 
     // Stormvarning och lä.
     ctx.textAlign = 'left';
@@ -477,7 +563,11 @@ const Game = {
     Sound.play('clang');
   },
   onEnemyAlert() {},
-  onEnemySeen() {},
+  onEnemySeen(e) {
+    if (this.seenTypes[e.type] || !LIRRA.firstSeen[e.type]) return;
+    this.seenTypes[e.type] = true;
+    Spren.say(LIRRA.firstSeen[e.type], 5);
+  },
   onEnemyWindup(e) { Spren.anticipation(e); },
   onEnemyStrike() {},
   onEnemyShoot(e) { this.sfx('arrow', e.pos); },
@@ -504,7 +594,7 @@ const Game = {
       Spren.glory = 6;
       p.addLight(p.stats.maxLight);
       Effects.burst(c[0], c[1], c[2], [0.4, 1, 0.65], 40, 6, 1, 0.12);
-      if (this.bossSpawned && !Bosses.boss && !this.complete) this.stageComplete();
+      if ((this.stageBoss ? this.bossSpawned : this.goalGem) && !Bosses.boss && !this.complete) this.stageComplete();
       else this.showBanner('Gemheart', 'Stormlight fyller dig', '#9dffc8', 2.5);
     } else if (o.kind === 'knobweed') {
       p.hp = Math.min(p.stats.maxHp, p.hp + 35);
@@ -515,7 +605,9 @@ const Game = {
   // Etappen klar: svär nästa Ideal och gå vidare.
   stageComplete() {
     this.complete = true;
-    const ideal = Progression.swearNext(this);
+    this.goalGem = false;
+    Progression.wealth += this.stats.wealth + 25;
+    const ideal = this.stageBoss ? Progression.swearNext(this) : null;
     const p = this.player;
     const c = p.center(this._c);
     if (ideal) {

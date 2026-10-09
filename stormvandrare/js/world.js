@@ -99,9 +99,15 @@ const World = {
         const isStart = i === 0 && j === Math.floor(rows / 2);
         if (!isStart && rng() < 0.08) continue; // ibland ett stort hål
         const radius = isStart ? 30 : cell * rand2(rng, 0.33, 0.47);
-        const top = isStart ? 0 : Math.round(heightAt(cx, cz));
+        const gen = theme.gen || {};
+        let top = isStart ? 0 : Math.round(heightAt(cx, cz) * (gen.heightVar || 22) / 22);
+        if (gen.tall && !isStart) top += gen.tall;
+        if (isStart && gen.startLow) top = CHASM_FLOOR + 2;
         const poly = blobPoly(cx, cz, radius, isStart ? 16 : 13, rng, 0.22);
-        const pr = this.addPrism(poly, CHASM_FLOOR - 4, top, 'plateau');
+        // Svävande öar i Ursprunget: botten hänger fritt i luften.
+        const y0 = gen.floating && !isStart ? top - rand2(rng, 14, 28) : CHASM_FLOOR - 4;
+        const pr = this.addPrism(poly, y0, top, 'plateau');
+        pr.floating = gen.floating && !isStart;
         pr.id = id++;
         pr.radius = radius;
         this.plateaus.push(pr);
@@ -110,11 +116,12 @@ const World = {
     }
     // Slutarenan: en stor platå bortom de andra.
     const ax = cols * cell + 50;
-    this.arena = this.addPrism(blobPoly(ax, 0, 60, 20, rng, 0.08), CHASM_FLOOR - 4, 2, 'plateau');
+    const aTop = (theme.gen && theme.gen.startLow) ? CHASM_FLOOR + 2 : 2;
+    this.arena = this.addPrism(blobPoly(ax, 0, 60, 20, rng, 0.08), CHASM_FLOOR - 4, aTop, 'plateau');
     this.arena.radius = 60;
     this.arena.isArena = true;
     this.plateaus.push(this.arena);
-    this.goal = { x: ax, y: 2, z: 0 };
+    this.goal = { x: ax, y: aTop, z: 0 };
 
     // Broar mellan några grannplatåer (som de som brolagen bär).
     for (const a of this.plateaus) {
@@ -155,6 +162,16 @@ const World = {
       const progress = clamp(pl.cx / L, 0, 1);
       this.populate(pl, opts, rng, progress);
     }
+    // Klyftornas djup: fiender och knobweed även på botten.
+    if (theme.gen && theme.gen.startLow) {
+      for (let k = 0; k < 10 + opts.level * 3; k++) {
+        const x = rand2(rng, 40, L), z = (rng() - 0.5) * W;
+        if (this.insideAny(x, CHASM_FLOOR + 1, z)) continue;
+        const type = pickWeighted(rng, [[3, 'crab'], [2, 'warrior'], [1.5, 'archer'], [1, 'leech'], [opts.level > 2.5 ? 1 : 0, 'shield'], [opts.level > 3 ? 0.8 : 0, 'hover']]);
+        this.spawns.push({ type, x, y: CHASM_FLOOR + 0.2, z, elite: rng() < 0.05, home: null });
+        if (rng() < 0.2) this.herbSpots.push({ x: x + 3, y: CHASM_FLOOR, z });
+      }
+    }
     // Sfärer på klyftbotten.
     for (let k = 0; k < 18 + opts.level * 2; k++) {
       const x = rng() * L, z = (rng() - 0.5) * W;
@@ -185,7 +202,7 @@ const World = {
   },
 
   populate(pl, opts, rng, progress) {
-    const level = opts.level;
+    const level = Math.floor(opts.level);
     const types = [{ w: 3, v: 'crab' }, { w: 4, v: 'warrior' }];
     if (progress > 0.15 || level > 1) types.push({ w: 2.5, v: 'archer' });
     if (level >= 2 || progress > 0.5) types.push({ w: 1.5 + level * 0.3, v: 'shield' });
@@ -431,6 +448,16 @@ const World = {
         b++;
       }
     }
+    if (p.floating) {
+      // Svävande ö: en klippig spets under.
+      const tipY = p.y0 - (p.y1 - p.y0) * 0.7;
+      for (let i = 0; i < n; i++) {
+        const j = (i + 1) % n;
+        const ax = poly[i * 2], az = poly[i * 2 + 1], bx = poly[j * 2], bz = poly[j * 2 + 1];
+        const c = colShade(th.strata[i % th.strata.length], 0.7);
+        mb.tri(ax, p.y0, az, bx, p.y0, bz, cx + (ax - cx) * 0.15, tipY, cz + (az - cz) * 0.15, c);
+      }
+    }
     if (p.kind === 'bridge') {
       // Rep och plankor.
       const steps = Math.floor(Math.hypot(poly[4] - poly[2], poly[5] - poly[3]) / 1.2);
@@ -482,7 +509,8 @@ const World = {
       }
     }
     // Lummig växtlighet i klyftorna.
-    for (let k = 0; k < 900; k++) {
+    const floorPlants = Math.floor(900 * ((th.gen && th.gen.grass) || 1));
+    for (let k = 0; k < floorPlants; k++) {
       const x = rand2(rng, this.bounds.x0, this.bounds.x1), z = rand2(rng, this.bounds.z0, this.bounds.z1);
       if (this.insideAny(x, CHASM_FLOOR + 0.5, z)) continue;
       const s = rand2(rng, 1.2, 2.6);
@@ -511,9 +539,17 @@ const World = {
 };
 
 function rand2(rng, a, b) { return a + rng() * (b - a); }
+function pickWeighted(rng, list) {
+  let tot = 0;
+  for (const [w] of list) tot += w;
+  let r = rng() * tot;
+  for (const [w, v] of list) { r -= w; if (r <= 0) return v; }
+  return list[0][1];
+}
 function randInt2(rng, a, b) { return Math.floor(a + rng() * (b - a + 1)); }
 
-// Färgteman per region.
+// Färgteman och genereringsval per region.
+// gen: { heightVar, startLow (start och arena på klyftbotten), floating (svävande öar), grass }
 const THEMES = {
   plains: {
     name: 'Splittrade slätterna',
@@ -524,5 +560,39 @@ const THEMES = {
     wood: col('#8a6a45'), woodDark: col('#5a4128'),
     sky: { top: [0.32, 0.55, 0.85], horizon: [0.86, 0.85, 0.78], ground: [0.55, 0.45, 0.38], sun: [1.25, 1.1, 0.9], cloud: [0.95, 0.94, 0.92] },
     ambientSky: [0.4, 0.45, 0.55], ambientGround: [0.32, 0.24, 0.19], fog: 0.0042, sunDir: [-0.45, 0.62, 0.35],
+    gen: { heightVar: 22, grass: 1 }, weather: 'dust', storm: [70, 125],
+  },
+  chasms: {
+    name: 'Klyftornas djup',
+    top: col('#9b7a5a'), topAlt: col('#7f8a4a'), boulderTop: col('#7d6a58'),
+    strata: [col('#7a4a32'), col('#8a5a3c'), col('#6a4030'), col('#7f5038'), col('#5f3a2a')],
+    floor: col('#3f5a32'), floorAlt: col('#4f6e3a'),
+    grass: col('#4f8a4a'), grassTip: col('#b0d860'), bud: col('#8a5a6a'), vine: col('#c04a8a'),
+    wood: col('#6a5038'), woodDark: col('#4a3424'),
+    sky: { top: [0.28, 0.45, 0.62], horizon: [0.62, 0.72, 0.62], ground: [0.3, 0.36, 0.28], sun: [1.0, 1.0, 0.85], cloud: [0.85, 0.9, 0.85] },
+    ambientSky: [0.32, 0.42, 0.4], ambientGround: [0.22, 0.28, 0.18], fog: 0.0048, sunDir: [-0.2, 0.85, 0.2],
+    gen: { heightVar: 10, startLow: true, tall: 34, grass: 3 }, weather: 'spores', storm: [90, 150],
+  },
+  frost: {
+    name: 'Frostlanden',
+    top: col('#e8eef4'), topAlt: col('#c9d6e2'), boulderTop: col('#b8c4d0'),
+    strata: [col('#7d8a9a'), col('#8e9aaa'), col('#6d7a8a'), col('#9aa6b4'), col('#5f6a78')],
+    floor: col('#a8b6c4'), floorAlt: col('#c4d0dc'),
+    grass: col('#7a8a7a'), grassTip: col('#c8d8d0'), bud: col('#8a96a2'), vine: col('#6a7a8a'),
+    wood: col('#7a6a58'), woodDark: col('#4a4038'),
+    sky: { top: [0.45, 0.58, 0.75], horizon: [0.88, 0.9, 0.94], ground: [0.7, 0.72, 0.76], sun: [1.15, 1.1, 1.05], cloud: [0.96, 0.97, 1.0] },
+    ambientSky: [0.5, 0.56, 0.66], ambientGround: [0.4, 0.42, 0.46], fog: 0.0042, sunDir: [-0.7, 0.32, 0.4],
+    gen: { heightVar: 26, grass: 0.4 }, weather: 'snow', storm: [110, 170],
+  },
+  origin: {
+    name: 'Ursprunget',
+    top: col('#5a5660'), topAlt: col('#6a6470'), boulderTop: col('#4a4650'),
+    strata: [col('#3a3640'), col('#4a4450'), col('#2e2a34'), col('#443e4a'), col('#36303c')],
+    floor: col('#16141c'), floorAlt: col('#201c26'),
+    grass: col('#3a5a5a'), grassTip: col('#6ab0c0'), bud: col('#4a4a5a'), vine: col('#5a8aa0'),
+    wood: col('#4a4038'), woodDark: col('#2a2420'),
+    sky: { top: [0.16, 0.18, 0.28], horizon: [0.42, 0.36, 0.42], ground: [0.12, 0.1, 0.14], sun: [0.8, 0.75, 0.85], cloud: [0.35, 0.34, 0.42] },
+    ambientSky: [0.34, 0.34, 0.46], ambientGround: [0.16, 0.14, 0.2], fog: 0.0036, sunDir: [0.3, 0.55, -0.4],
+    gen: { heightVar: 30, floating: true, grass: 0.6 }, weather: 'ash', storm: [45, 85],
   },
 };

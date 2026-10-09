@@ -46,7 +46,8 @@ ett steg.
 | `js/pickups.js` | Sfärer, gemhearts, knobweed |
 | `js/storm.js` | Highstorm och Everstorm |
 | `js/bosses.js` | Fyra bossar med träffzoner och faser |
-| `js/progression.js` | Ideal och upplåsning av förmågor |
+| `js/progression.js` | Ideal, upplåsning av förmågor och färdighetsträd |
+| `js/regions.js` | Regioner, etapper, berättelse, Lirras repliker, `Campaign` |
 | `js/game.js` | Loop med fast tidssteg, skada, händelser, HUD (tillfällig canvas-HUD) |
 
 Kontroller just nu: WASD, mus (pekarlås), vänsterklick = hugg, högerklick eller V =
@@ -87,9 +88,14 @@ F = Lasha fiende, G/mittenklick = spjut, C = vindkallelse, piltangenter = kamera
       `js/spren.js` (windspren, honorsprenen Lirra med `Spren.say()` för repliker,
       gloryspren, painspren, anticipationspren, fearspren, lifespren), röd
       skadeblixt och puls vid lågt liv, fotsteg.
-- [ ] Steg 6: kampanj med regioner (Splittrade slätterna, klyftornas djup,
-      Frostlanden, stormens ursprung), karta, läger med färdighetsträd
-      (gemhearts), berättelse och Lirras repliker, oändligt läge.
+- [x] Steg 6: `js/regions.js` (fyra regioner × tre etapper: Splittrade
+      slätterna/chasmfiend, Klyftornas djup/Vev-Tarun, Frostlanden/Thunderclast,
+      Ursprunget/härolden; berättelse om Arin och Lirra; Lirras handledning,
+      första-gången-repliker, bossrepliker; `Campaign` med oändlig expedition).
+      Teman i `THEMES` (färger, väder, stormtakt, `gen`: höjd, start på
+      klyftbotten, svävande öar). Etapper utan boss slutar med väktare och en
+      gemheart. Färdighetsträd `SKILLS` + `Progression.wealth/skills/buy` (ännu
+      utan UI – kommer i steg 7). Väder: damm, sporer, snö, aska.
 - [ ] Steg 7: menyer i skissboksstil, bestiarie med skisser, sparning
       (localStorage, tysta fel), prestationer.
 - [ ] Steg 8: mobil (joystick, kamera-drag, knappar) och handkontroll (Gamepad API).
