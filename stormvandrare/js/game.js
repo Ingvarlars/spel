@@ -16,6 +16,8 @@ const Game = {
   player: new Player(),
   touchMove: null,
   stormDark: 0,
+  mods: { hp: 1, dmg: 1, speed: 1 },
+  stats: null,
   _mw: { x: 0, y: 0 },
   _view: { x0: 0, y0: 0, x1: 0, y1: 0 },
 
@@ -47,6 +49,12 @@ const Game = {
   startStage(level, seed) {
     World.generate(level, seed);
     Effects.reset();
+    Enemies.reset();
+    Blade.reset();
+    Input.clearQueue();
+    this.stats = { kills: 0, damage: 0, taken: 0 };
+    this.mods = { hp: 1 + (level - 1) * 0.25, dmg: 1 + (level - 1) * 0.15, speed: 1 + Math.min(0.25, (level - 1) * 0.05) };
+    for (const s of World.spawns) Enemies.spawn(s.type, s.x, s.y, this.mods, s.elite);
     this.time = 0;
     this.tick = 0;
     const p = this.player;
@@ -85,6 +93,10 @@ const Game = {
     this.tick++;
     const p = this.player;
     p.update(dt, this);
+    Blade.update(dt, this);
+    Enemies.update(dt, this);
+    Enemies.updateBeams(dt);
+    Projectiles.update(dt, this);
     World.updateDecor(dt, this);
     Effects.update(dt);
     this.updateCamera(dt);
@@ -139,7 +151,11 @@ const Game = {
     ctx.setTransform(s, 0, 0, s, this.w * this.dpr / 2 - cx * s, this.h * this.dpr / 2 - cy * s);
     World.drawTiles(ctx, this);
     World.drawDecor(ctx, this);
+    Enemies.draw(ctx, this);
+    Projectiles.draw(ctx, this);
     this.player.draw(ctx, this);
+    Blade.drawInHand(ctx, this);
+    Blade.draw(ctx, this);
     Effects.draw(ctx, this);
     Effects.drawTexts(ctx);
 
@@ -157,7 +173,77 @@ const Game = {
     ctx.fillRect(14, 32, 212 * p.light / p.stats.maxLight, 12);
   },
 
+  // Hjälper siktet mot en fiende i ungefär rätt riktning.
+  aimAssist(angle, range) {
+    const p = this.player;
+    let best = null, bestScore = 1e9;
+    const list = Enemies.list;
+    const maxDiff = this.touchMove ? 1.2 : 0.5;
+    for (let i = 0; i < list.length; i++) {
+      const e = list[i];
+      if (e.dead) continue;
+      const dx = e.x - p.x, dy = e.y - p.y, d = Math.hypot(dx, dy);
+      if (d > range + e.w / 2) continue;
+      const diff = Math.abs(angleDiff(Math.atan2(dy, dx), angle));
+      if (diff > maxDiff) continue;
+      const score = d + diff * 120;
+      if (score < bestScore) { bestScore = score; best = e; }
+    }
+    return best ? Math.atan2(best.y - p.y, best.x - p.x) : angle;
+  },
+
+  // All skada på fiender går hit. Returnerar faktisk skada.
+  damageEnemy(e, dmg, kx, ky, source) {
+    if (e.dead) return 0;
+    const p = this.player;
+    if ((source === 'blade' || source === 'spear') && Enemies.blocks(e, p.x, p.y)) {
+      this.onBlocked(e);
+      p.vx += (p.x < e.x ? -1 : 1) * 260;
+      return 0;
+    }
+    e.hp -= dmg;
+    e.flash = 0.08;
+    e.alert = true;
+    const w = e.def.weight * (e.boss ? 20 : 1);
+    e.vx += kx / w;
+    e.vy += ky / w;
+    if (e.type === 'crab' && (Math.abs(kx) + Math.abs(ky)) > 50) e.attached = false;
+    if (e.type === 'leech') { e.state = 1; e.timer = 1.2; }
+    this.stats.damage += dmg;
+    this.onEnemyHit(e, dmg, source);
+    if (e.hp <= 0) this.killEnemy(e);
+    return dmg;
+  },
+
+  killEnemy(e) {
+    e.dead = true;
+    this.stats.kills++;
+    this.onEnemyKilled(e);
+  },
+
   // --- Händelser ---
+  onSwing() {},
+  onCarve() { Effects.shake(0.08); },
+  onParry(b) { Effects.sparks(b.x, b.y, Math.atan2(-b.vy, -b.vx), 0.8, '#ffe9b0', 8, 260); },
+  onBlocked(e) {
+    Effects.sparks(e.x + e.facing * 16, e.y - 6, e.facing > 0 ? 0 : Math.PI, 0.9, '#ffd27a', 10, 300);
+    Effects.text(e.x, e.y - e.h / 2 - 16, 'Blockerat', '#ffd27a', 13);
+  },
+  onEnemyAlert() {},
+  onEnemyStrike() {},
+  onEnemyShoot() {},
+  onThunderCharge() {},
+  onBeam(e, x, y) { Effects.sparks(x, y, 0, Math.PI, '#ff4d7a', 10, 200); Effects.shake(0.12); },
+  onBruteSlam(e) { Effects.shake(0.35); Effects.debris(e.x, e.y + e.h / 2, '#9a7a5a', 20, 300); },
+  onEnemyHit(e, dmg) {
+    Effects.sparks(e.x, e.y, rand(0, TAU), Math.PI, '#e8f6ff', 5, 220);
+    Effects.text(e.x, e.y - e.h / 2 - 6, String(Math.round(dmg)), '#fff4d6', 14);
+  },
+  onEnemyKilled(e) {
+    Effects.burst(e.x, e.y, 'rgba(230,245,255,0.9)', 16, 220, 0.6, 3);
+    Effects.debris(e.x, e.y, e.type === 'brute' ? '#7a6656' : '#6d5c55', e.type === 'brute' ? 24 : 10, 220);
+  },
+
   onLash(p, reset) {
     Effects.burst(p.x, p.y, 'rgba(220,240,255,0.9)', reset ? 6 : 14, 180, 0.4, 3);
   },

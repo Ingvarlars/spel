@@ -1,17 +1,17 @@
 'use strict';
-// Stormvandraren: rörelse relativt den egna gravitationen, fallbindning och stormglöd.
+// Windrunnern: rörelse relativt den egna gravitationen, Lashings och Stormlight.
 
 function basePlayerStats() {
   return {
     maxHp: 100,
     maxLight: 100,
     speed: 260,          // löpfart (px/s)
-    lashCost: 4,         // stormglöd per bindning
-    lashDrain: 1.2,      // stormglöd per sekund och bindningsstyrka
-    maxLashes: 3,        // flera bindningar åt samma håll
-    healRate: 18,        // HP per sekund när stormglöd läker
-    healCost: 0.34,      // stormglöd per läkt HP
-    leak: 0.35,          // stormglöd som ångar bort per sekund
+    lashCost: 4,         // Stormlight per Lashing
+    lashDrain: 1.2,      // Stormlight per sekund och Lashing-styrka
+    maxLashes: 3,        // flera Lashings åt samma håll
+    healRate: 18,        // HP per sekund när Stormlight läker
+    healCost: 0.34,      // Stormlight per läkt HP
+    leak: 0.35,          // Stormlight som ångar bort per sekund
     bladeDamage: 30,
     bladeSpeed: 1,       // hugghastighet
     bladeReach: 1,       // räckvidd
@@ -78,7 +78,7 @@ class Player {
     }
   }
 
-  // Binder sitt fall åt (dx, dy). Samma håll igen = starkare (flera bindningar).
+  // Lashing åt (dx, dy). Samma håll igen = starkare (flera Lashings).
   lash(dx, dy, game) {
     const len = Math.hypot(dx, dy);
     if (len < 0.01) {
@@ -110,7 +110,7 @@ class Player {
     const m = Input.readMove(this.move);
     if (game.touchMove) { m.x = game.touchMove.x; m.y = game.touchMove.y; }
 
-    // --- Fallbindning ---
+    // --- Lashings ---
     if (Input.consume('lash')) {
       if (Input.mouseLash && Input.mouseAiming()) {
         const a = game.mouseWorld();
@@ -187,7 +187,7 @@ class Player {
     const landed = (gx > 0.5 && hit & 2) || (gx < -0.5 && hit & 1) || (gy > 0.5 && hit & 8) || (gy < -0.5 && hit & 4);
     if (landed && this.fallSpeed > 650) game.onSlam(this, this.fallSpeed);
 
-    // --- Stormglöd: läkning och läckage ---
+    // --- Stormlight: läkning och läckage ---
     if (this.light > 0) {
       this.light = Math.max(0, this.light - s.leak * dt);
       if (this.hp < s.maxHp && this.alive) {
@@ -247,7 +247,7 @@ class Player {
     ctx.save();
     ctx.translate(this.x, this.y);
 
-    // Stormglödens sken.
+    // Stormlightens sken.
     if (this.light > 1) {
       const r = 34 + glow * 30 + Math.sin(t * 4) * 3;
       const g = ctx.createRadialGradient(0, 0, 4, 0, 0, r);
@@ -293,7 +293,7 @@ class Player {
     ctx.beginPath(); ctx.arc(0, -18, 6, 0, TAU); ctx.fill();
     ctx.fillStyle = '#1e1a18';
     ctx.beginPath(); ctx.arc(-1, -20, 6, Math.PI * 0.9, Math.PI * 2.05); ctx.fill();
-    // Ögonen lyser när man håller stormglöd.
+    // Ögonen lyser när man håller Stormlight.
     ctx.fillStyle = this.light > 1 ? '#bfe6ff' : '#2a2622';
     ctx.fillRect(2, -19, 2, 2);
     // Arm.
@@ -302,7 +302,7 @@ class Player {
     ctx.beginPath(); ctx.moveTo(0, -9); ctx.lineTo(7, -1 + run * 2); ctx.stroke();
     ctx.restore();
 
-    // Stormglöd som ångar från huden.
+    // Stormlight som ångar från huden.
     if (this.light > 5 && (game.tick % 3) === 0) {
       Effects.particle(this.x + rand(-8, 8), this.y + rand(-14, 14), rand(-10, 10), rand(-40, -20), rand(0.5, 1), rand(2, 3.5), 'rgba(225,245,255,0.8)', 1);
     }

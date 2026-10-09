@@ -1,10 +1,10 @@
 'use strict';
-// Banan: procedurgenererade platåer och klyftor.
+// Banan: procedurgenererade platåer och klyftor (de Splittrade slätterna m.fl.).
 // Rutnät med typer, kollision för rektanglar och rendering i förrenderade bitar.
 
 const T_EMPTY = 0;
 const T_ROCK = 1;     // vanligt berg
-const T_BOULDER = 2;  // löst berg som glödklingan kan skära igenom
+const T_BOULDER = 2;  // löst berg som en Shardblade kan skära igenom
 const T_BEDROCK = 3;  // klyftans botten och kanter, går inte att förstöra
 
 const ROWS = 64;
@@ -154,7 +154,7 @@ const World = {
       const tx = ri(plat.x0 + 1, plat.x1 - 1);
       this.sphereSpots.push({ x: (tx + 0.5) * TILE, y: this.surfaceRow(tx) * TILE - 12, dun: rng() < 0.35 });
     }
-    // Stenknoppar och gräs som drar sig undan när man kommer nära.
+    // Rockbuds och gräs som drar sig undan när man kommer nära.
     for (let i = plat.x0 + 1; i < plat.x1; i++) {
       const roll = rng();
       if (roll < 0.12) this.decor.push({ kind: 'bud', x: (i + 0.5) * TILE, y: this.surfaceRow(i) * TILE, size: 10 + rng() * 8, open: 1, hue: rng() });
@@ -187,7 +187,7 @@ const World = {
 
   solidAtPx(x, y) { return this.solid(Math.floor(x / TILE), Math.floor(y / TILE)); },
 
-  // Tar bort en ruta (t.ex. skuren av glödklingan). Returnerar true om något försvann.
+  // Tar bort en ruta (t.ex. skuren av en Shardblade). Returnerar true om något försvann.
   carve(tx, ty) {
     const t = this.get(tx, ty);
     if (t !== T_BOULDER) return false;
@@ -289,7 +289,7 @@ const World = {
         const left = this.get(tx - 1, ty) === T_EMPTY;
         const right = this.get(tx + 1, ty) === T_EMPTY;
         if (up) {
-          // Ytan: ljust stoft och en mörk kant.
+          // Ytan: crem (ljust stoft) och en mörk kant.
           g.fillStyle = t === T_BOULDER ? '#b89a7a' : '#d7a77a';
           g.fillRect(px, py, TILE, 5);
           g.fillStyle = 'rgba(80,110,60,0.55)';
@@ -396,7 +396,7 @@ const World = {
     for (let i = 0; i < this.decor.length; i++) {
       const d = this.decor[i];
       if (d.x < v.x0 || d.x > v.x1) continue;
-      // Stenknoppar och gräs drar sig undan när någon kommer nära eller stormen blåser.
+      // Rockbuds och gräs drar sig undan när någon kommer nära eller stormen blåser.
       const near = dist2(d.x, d.y, p.x, p.y) < (d.kind === 'bud' ? 110 * 110 : 70 * 70) || game.inStorm(d.x, d.y);
       const target = near ? 0 : 1;
       d.open += (target - d.open) * Math.min(1, dt * (near ? 10 : 1.2));

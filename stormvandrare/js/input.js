@@ -1,5 +1,5 @@
 'use strict';
-// Tangentbord och mus. Rörelse läses varje tick; handlingar (hugg, bindning,
+// Tangentbord och mus. Rörelse läses varje tick; handlingar (hugg, Lashing,
 // hopp ...) köas som händelser så att inga snabba tryck missas.
 
 const Input = {
@@ -7,8 +7,8 @@ const Input = {
   listeners: Object.create(null),
   queued: Object.create(null),   // handlingar som spelaren konsumerar
   mouse: { x: 0, y: 0, active: false, lastMove: -10 },
-  mouseLash: false,               // senaste bindningen kom från musen
-  lashDir: { x: 0, y: 0 },        // riktning när bindningstangenten trycktes
+  mouseLash: false,               // senaste Lashingen kom från musen
+  lashDir: { x: 0, y: 0 },        // riktning när Lashing-tangenten trycktes
 
   init(canvas) {
     const keyAction = {
