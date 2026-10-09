@@ -71,12 +71,23 @@ const WEAPONS = {
     },
     draw(w, ctx, game) {
       if (!w.points) return;
-      const sp = Sprites.get('orb', 9, 12, (g) => neonShape(g, this.color, 12, 2.5, 0.5, circlePath(9)));
+      // Fyruddigt blad som snurrar.
+      const sp = Sprites.get('orb', 12, 12, (g) => neonShape(g, '#ff8ae0', 12, 2, 0.75, (p) => {
+        for (let i = 0; i < 8; i++) {
+          const a = (i / 8) * TAU, r = i % 2 ? 4 : 12;
+          if (i === 0) p.moveTo(Math.cos(a) * r, Math.sin(a) * r); else p.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+        }
+      }));
       const sc = game.player.stats.area;
       const half = sp.half * sc;
+      const rot = w.angle * 3;
       for (let i = 0; i < w.points.length; i++) {
         const pt = w.points[i];
-        ctx.drawImage(sp.img, pt.x - half, pt.y - half, half * 2, half * 2);
+        ctx.save();
+        ctx.translate(pt.x, pt.y);
+        ctx.rotate(rot);
+        ctx.drawImage(sp.img, -half, -half, half * 2, half * 2);
+        ctx.restore();
       }
     },
   },

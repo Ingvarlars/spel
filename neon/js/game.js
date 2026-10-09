@@ -17,6 +17,8 @@ const Game = {
   vt: { s: 1, tx: 0, ty: 0 }, // aktuell vy-transform
   stats: null,
   waveMods: null,
+  tick: 0,
+  hurtVignette: 0,
   boss: null,
   banner: null,
   level: 1,
@@ -33,6 +35,13 @@ const Game = {
     this.resize();
     Input.init();
     UI.init();
+    // Ljud kräver en användarhändelse innan det får spelas.
+    const unlock = () => Sound.unlock();
+    window.addEventListener('keydown', unlock);
+    window.addEventListener('pointerdown', unlock);
+    Input.on('mute', () => this.toggleMute());
+    const muteBtn = document.getElementById('btn-mute');
+    muteBtn.addEventListener('click', (e) => { e.stopPropagation(); this.toggleMute(); muteBtn.blur(); });
     Input.on('choose1', () => this.chooseUpgrade(0));
     Input.on('choose2', () => this.chooseUpgrade(1));
     Input.on('choose3', () => this.chooseUpgrade(2));
@@ -56,6 +65,8 @@ const Game = {
     Enemies.reset();
     Weapons.reset();
     Pickups.reset();
+    Effects.reset();
+    this.hurtVignette = 0;
     Upgrades.reset();
     this.level = 1;
     this.xp = 0;
@@ -97,6 +108,8 @@ const Game = {
 
   update(dt) {
     this.time += dt;
+    this.tick++;
+    if (this.hurtVignette > 0) this.hurtVignette -= dt;
     const p = this.player;
     p.update(dt, this);
 
@@ -108,6 +121,13 @@ const Game = {
     Enemies.update(dt, this);
     Weapons.update(dt, this);
     Pickups.update(dt, this);
+    Effects.update(dt);
+
+    // Motorspår bakom farkosten.
+    if (p.alive && (this.tick & 1) === 0 && (p.vx * p.vx + p.vy * p.vy) > 2500) {
+      const bx = p.x - Math.cos(p.angle) * 10, by = p.y - Math.sin(p.angle) * 10;
+      Effects.particle(bx, by, -Math.cos(p.angle) * 80 + rand(-20, 20), -Math.sin(p.angle) * 80 + rand(-20, 20), p.dashing ? 0.4 : 0.25, p.dashing ? 4 : 2.5, p.dashing ? '#ffffff' : PLAYER_COLOR, 4);
+    }
     if (this.pendingLevels > 0) this.openLevelUp();
 
     // Kameran följer spelaren mjukt och hålls inom banan.
@@ -187,6 +207,19 @@ const Game = {
     this.onEnemyKilled(e);
   },
 
+  toggleMute() {
+    Sound.unlock();
+    Sound.toggleMute();
+    this.updateMuteButton();
+  },
+
+  updateMuteButton() {
+    const b = document.getElementById('btn-mute');
+    b.textContent = Sound.muted ? '🔇' : '🔊';
+    b.setAttribute('aria-label', Sound.muted ? 'Slå på ljud' : 'Stäng av ljud');
+    b.classList.toggle('off', Sound.muted);
+  },
+
   addXp(v) {
     this.xp += v;
     while (this.xp >= this.xpNext) {
@@ -217,6 +250,11 @@ const Game = {
   },
 
   onEnemyKilled(e) {
+    const big = e.type === 'tank' || e.isBoss;
+    Effects.burst(e.x, e.y, e.def.color, big ? 30 : 10, big ? 320 : 220, 0.5, 3);
+    Effects.burst(e.x, e.y, '#ffffff', big ? 10 : 3, 160, 0.3, 2);
+    if (big) { Effects.ring(e.x, e.y, e.r * 3, e.def.color, 0.45, 4); Effects.shake(0.15); }
+    Sound.play(big ? 'explosion' : 'kill');
     const xp = e.xp * (1 + Math.max(0, this.wave - 1) * 0.08);
     if (xp > 0) Pickups.dropXp(e.x, e.y, Math.max(1, Math.round(xp)));
     const r = Math.random();
@@ -229,15 +267,24 @@ const Game = {
   },
 
   onWaveStart(w) {
+    Sound.play('wave');
     this.showBanner('VÅG ' + w, w === 1 ? 'Överlev!' : 'Fienderna blir starkare', '#3ff6ff');
   },
 
   onBossSpawn(b) {
+    Effects.shake(0.4);
+    Sound.play('boss');
     this.boss = b;
     this.showBanner('VÅG ' + this.wave + ' – BOSS', 'Kärnan nivå ' + b.level + ' närmar sig!', '#ff2050');
   },
 
   onBossKilled(b) {
+    Effects.burst(b.x, b.y, '#ff2050', 120, 600, 1.2, 4);
+    Effects.burst(b.x, b.y, '#ffe23f', 60, 400, 1, 3);
+    Effects.ring(b.x, b.y, 400, '#ff2050', 1, 8);
+    Effects.ring(b.x, b.y, 250, '#ffe23f', 0.7, 5);
+    Effects.shake(1);
+    Sound.play('bigExplosion');
     this.boss = null;
     this.stats.bosses = (this.stats.bosses || 0) + 1;
     Pickups.dropXp(b.x, b.y, 60 + 40 * b.level);
@@ -247,6 +294,9 @@ const Game = {
   },
 
   onPickup(o) {
+    if (o.kind === 'heart') { Sound.play('heal'); Effects.text(this.player.x, this.player.y - 24, '+30', '#3fff8a', 18); }
+    else if (o.kind === 'magnet') { Sound.play('levelUp'); Effects.ring(this.player.x, this.player.y, 300, '#ffe23f', 0.5, 4); }
+    else Sound.play('pickup');
     if (o.kind === 'xp') this.addXp(o.value);
     else if (o.kind === 'heart') this.player.heal(30);
     else if (o.kind === 'magnet') Pickups.magnetAll();
@@ -261,8 +311,8 @@ const Game = {
     const s = this.dpr * this.zoom;
     const vt = this.vt;
     vt.s = s;
-    vt.tx = this.w * this.dpr / 2 - this.cam.x * s;
-    vt.ty = this.h * this.dpr / 2 - this.cam.y * s;
+    vt.tx = this.w * this.dpr / 2 - (this.cam.x + Effects.shakeX) * s;
+    vt.ty = this.h * this.dpr / 2 - (this.cam.y + Effects.shakeY) * s;
     ctx.setTransform(s, 0, 0, s, vt.tx, vt.ty);
     this.drawBackground(ctx);
     Pickups.draw(ctx, this, this.realTime);
@@ -271,6 +321,27 @@ const Game = {
     Weapons.draw(ctx, this, vt);
     ctx.globalCompositeOperation = 'source-over';
     this.player.draw(ctx, this.realTime);
+    Effects.draw(ctx, this);
+    Effects.drawTexts(ctx);
+
+    // Röd kant när spelaren tar skada eller har lite liv kvar.
+    const p = this.player;
+    const low = p.alive && p.hp < p.stats.maxHp * 0.3 ? 0.25 + 0.15 * Math.sin(this.realTime * 6) : 0;
+    const vig = Math.max(this.hurtVignette, low);
+    if (vig > 0) {
+      ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+      const g = this.vignette || (this.vignette = { w: 0, h: 0, grad: null });
+      if (g.w !== this.w || g.h !== this.h) {
+        g.w = this.w; g.h = this.h;
+        g.grad = ctx.createRadialGradient(this.w / 2, this.h / 2, Math.min(this.w, this.h) * 0.3, this.w / 2, this.h / 2, Math.max(this.w, this.h) * 0.7);
+        g.grad.addColorStop(0, 'rgba(255,0,40,0)');
+        g.grad.addColorStop(1, 'rgba(255,0,40,1)');
+      }
+      ctx.globalAlpha = Math.min(0.6, vig);
+      ctx.fillStyle = g.grad;
+      ctx.fillRect(0, 0, this.w, this.h);
+      ctx.globalAlpha = 1;
+    }
     UI.drawHUD(ctx, this);
   },
 
@@ -306,19 +377,72 @@ const Game = {
   },
 
   // Händelser från spelaren (fylls på i senare steg).
-  onDash() {},
-  onShieldBlock() {},
-  onPlayerHurt() {},
-  onPlayerDeath() {},
-  onShoot() {},
-  onEnemyShoot() {},
-  onEnemyHit() {},
-  onLevelUp() {},
-  onBossRage() {},
-  onBossCharge() {},
-  onBossSummon() {},
-  onExplosion() {},
-  onMissileTrail() {},
+  // --- Effekter och ljud vid händelser ---
+  onDash(p) {
+    Effects.burst(p.x, p.y, PLAYER_COLOR, 14, 220, 0.35, 3);
+    Sound.play('dash');
+  },
+  onShieldBlock(p) {
+    Effects.ring(p.x, p.y, 70, '#7fa8ff', 0.4, 4);
+    Effects.burst(p.x, p.y, '#7fa8ff', 16, 260, 0.4, 3);
+    Effects.shake(0.15);
+    Sound.play('shield');
+  },
+  onPlayerHurt(p, dmg) {
+    Effects.burst(p.x, p.y, '#ff4060', 18, 260, 0.45, 3);
+    Effects.text(p.x, p.y - 20, '-' + Math.round(dmg), '#ff4060', 18);
+    Effects.shake(0.35 + Math.min(0.3, dmg / 60));
+    this.hurtVignette = 0.5;
+    Sound.play('hurt');
+  },
+  onPlayerDeath(p) {
+    Effects.burst(p.x, p.y, PLAYER_COLOR, 80, 500, 1.2, 4);
+    Effects.burst(p.x, p.y, '#ffffff', 40, 300, 0.8, 3);
+    Effects.ring(p.x, p.y, 220, PLAYER_COLOR, 0.8, 6);
+    Effects.shake(1);
+    Sound.play('bigExplosion');
+  },
+  onShoot(kind) {
+    Sound.play(kind === 'missile' ? 'missile' : kind === 'lightning' ? 'zap' : kind === 'nova' ? 'nova' : 'shoot');
+    if (kind === 'nova') Effects.shake(0.06);
+  },
+  onEnemyShoot(e, boss) {
+    if (!boss) Effects.sparks(e.x, e.y, e.angle, 0.4, e.def.color, 3, 120);
+    Sound.play('enemyShoot');
+  },
+  onEnemyHit(e, dmg, crit) {
+    Effects.sparks(e.x, e.y, rand(0, TAU), Math.PI, e.def.color, crit ? 5 : 2, 200);
+    Effects.text(e.x, e.y - e.r, String(Math.round(dmg)), crit ? '#ffe23f' : '#ffffff', crit ? 18 : 13);
+    Sound.play('hit');
+  },
+  onLevelUp() {
+    const p = this.player;
+    Effects.ring(p.x, p.y, 160, '#3fd0ff', 0.6, 5);
+    Sound.play('levelUp');
+  },
+  onBossRage(b) {
+    Effects.ring(b.x, b.y, 260, '#ff7a3f', 0.7, 6);
+    Effects.shake(0.5);
+    this.showBanner('RASERI!', 'Kärnan blir snabbare', '#ff7a3f');
+    Sound.play('boss');
+  },
+  onBossCharge(b) {
+    Effects.burst(b.x, b.y, '#ff2050', 20, 300, 0.4, 3);
+    Sound.play('charge');
+  },
+  onBossSummon(b) {
+    Effects.ring(b.x, b.y, 140, '#ff3fa4', 0.5, 4);
+  },
+  onExplosion(x, y, r, color) {
+    Effects.ring(x, y, r, color, 0.3, 4);
+    Effects.burst(x, y, color, 16, r * 5, 0.4, 3);
+    Effects.burst(x, y, '#ffffff', 6, r * 3, 0.25, 2);
+    Effects.shake(0.07);
+    Sound.play('explosion');
+  },
+  onMissileTrail(b) {
+    if ((this.tick & 1) === 0) Effects.particle(b.x, b.y, rand(-20, 20), rand(-20, 20), 0.35, 2.5, '#ff8a3f', 2);
+  },
 };
 
 window.addEventListener('load', () => Game.init());
