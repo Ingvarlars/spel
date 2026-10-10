@@ -57,12 +57,23 @@ const REGIONS = [
 // Lirras repliker vid olika tillfällen (egna texter).
 const LIRRA = {
   tutorial: [
-    [0, 'Hej! Jag heter Lirra. Gå med W A S D och titta dig omkring med musen. Klicka i fönstret om musen inte fångas.'],
+    // [tid, tangentbord, pekskärm, handkontroll]
+    [0, 'Hej! Jag heter Lirra. Gå med W A S D och titta dig omkring med musen. Klicka i fönstret om musen inte fångas.',
+      'Hej! Jag heter Lirra. Dra på vänster sida för att gå och på höger sida för att titta dig omkring.',
+      'Hej! Jag heter Lirra. Gå med vänster spak och titta dig omkring med höger spak.'],
     [6, 'Ser du de lysande sfärerna? Gå nära så andas du in deras Stormlight.'],
-    [14, 'Titta upp mot himlen och högerklicka – då Lashar du dig själv dit du tittar. Q tar tillbaka den vanliga gravitationen.'],
-    [24, 'Lasha samma håll flera gånger för att falla snabbare. E Lashar dig rakt nedåt – perfekt för ett nedslag!'],
-    [34, 'Vänsterklicka för att hugga med din Shardblade. Tre hugg i rad blir ett kraftfullt avslut.'],
-    [46, 'Shift ger en rusning av Stormlight. Stormlight läker dig också – men det tar slut fort.'],
+    [14, 'Titta upp mot himlen och högerklicka – då Lashar du dig själv dit du tittar. Q tar tillbaka den vanliga gravitationen.',
+      'Titta upp mot himlen och tryck Lash – då Lashar du dig själv dit du tittar. Åter tar tillbaka den vanliga gravitationen.',
+      'Titta upp mot himlen och tryck LT – då Lashar du dig själv dit du tittar. Styrkorset vänster tar tillbaka den vanliga gravitationen.'],
+    [24, 'Lasha samma håll flera gånger för att falla snabbare. E Lashar dig rakt nedåt – perfekt för ett nedslag!',
+      'Lasha samma håll flera gånger för att falla snabbare. Ned Lashar dig rakt nedåt – perfekt för ett nedslag!',
+      'Lasha samma håll flera gånger för att falla snabbare. LB Lashar dig rakt nedåt – perfekt för ett nedslag!'],
+    [34, 'Vänsterklicka för att hugga med din Shardblade. Tre hugg i rad blir ett kraftfullt avslut.',
+      'Tryck Hugg för att svinga din Shardblade. Tre hugg i rad blir ett kraftfullt avslut.',
+      'Tryck X eller RT för att hugga med din Shardblade. Tre hugg i rad blir ett kraftfullt avslut.'],
+    [46, 'Shift ger en rusning av Stormlight. Stormlight läker dig också – men det tar slut fort.',
+      'Rusa ger en rusning av Stormlight. Stormlight läker dig också – men det tar slut fort.',
+      'B ger en rusning av Stormlight. Stormlight läker dig också – men det tar slut fort.'],
     [60, 'Målet ligger österut: den stora platån bortom de andra. Följ solen när den går upp!'],
   ],
   firstSeen: {
@@ -78,7 +89,7 @@ const LIRRA = {
   boss: {
     chasmfiend: 'En chasmfiend! Huvudet är svagt när den vrålar – och den har en gemheart.',
     thunderclast: 'Den är för hög för att nås från marken. Lasha dig upp till de glödande kärnorna!',
-    heavenly: 'Vev-Tarun. Om din gravitation vänder sig – tryck Q!',
+    heavenly: 'Vev-Tarun. Om din gravitation vänder sig – ta tillbaka den direkt!',
     herald: 'Härolden är bara sårbar efter sina attacker, när kärnan lyser upp. Spjutet tar hårdast!',
   },
   kills: ['Snyggt!', 'Fortsätt så!', 'Jag är stolt över dig.', 'Det där var vackert gjort.', 'Lätt som en vindspren!'],

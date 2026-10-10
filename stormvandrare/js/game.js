@@ -47,7 +47,9 @@ const Game = {
     window.addEventListener('pointerdown', unlock);
     Input.on('mute', () => { const s = Save.data.settings; s.muted = !s.muted; this.applySettings(); Save.save(); this.toast(s.muted ? 'Ljudet är avstängt' : 'Ljudet är på', 'Tryck M för att växla'); });
     Input.on('pause', () => this.onPauseKey());
-    Input.on('unlock', () => { if (this.state === 'playing' && !this.touch) this.pause(); });
+    Input.on('unlock', () => { if (this.state === 'playing' && !this.touch && !Pad.active) this.pause(); });
+    TouchControls.init(this);
+    Pad.init(this);
     Input.on('blur', () => this.pause());
     document.addEventListener('visibilitychange', () => { if (document.hidden) this.pause(); });
     this.glCanvas.addEventListener('click', () => { if (this.state === 'playing') Input.requestLock(); });
@@ -206,6 +208,7 @@ const Game = {
   },
 
   setState(s) {
+    if (s !== 'playing') TouchControls.reset();
     this.state = s;
     document.body.setAttribute('data-state', s);
   },
@@ -295,8 +298,10 @@ const Game = {
     if (frame > 0.25) frame = 0.25;
     if (frame < 0) frame = 0;
     this.realTime += frame;
-    if (frame > 0) this.fps += (1 / frame - this.fps) * 0.05;
+    if (frame > 0.002) this.fps += (1 / frame - this.fps) * 0.05;
     this.frameDt = frame;
+    Pad.update(frame);
+    TouchControls.update(frame);
     if (this.state === 'playing') {
       this.acc += frame;
       let steps = 0;
@@ -366,7 +371,8 @@ const Game = {
     }
     // Lirras handledning i första etappen.
     if (this.stageCfg.tutorial && this.tutorialIdx < LIRRA.tutorial.length && this.time - this.stageStart >= LIRRA.tutorial[this.tutorialIdx][0]) {
-      Spren.say(LIRRA.tutorial[this.tutorialIdx][1], 8);
+      const line = LIRRA.tutorial[this.tutorialIdx];
+      Spren.say(line[Pad.active ? 3 : this.touch ? 2 : 1] || line[1], 8);
       this.tutorialIdx++;
     }
     if (p.alive && p.hp < p.stats.maxHp * 0.25 && !this._lowSaid) { this._lowSaid = true; Spren.say(pick(LIRRA.lowHp), 3); }
@@ -503,6 +509,8 @@ const Game = {
 
   // Vrider en riktning mot närmaste fiende inom räckvidd och vinkel.
   aimAssist(dir, range, cosLimit) {
+    // Pekskärm och handkontroll siktar grövre, så hjälpen blir generösare.
+    if (this.touch || Pad.active) { range *= 1.3; cosLimit = Math.min(cosLimit, cosLimit * 0.6 + 0.1); }
     const pc = this.player.center(this._c);
     let best = null, bestScore = -1e9;
     const ec = this._ec || (this._ec = V3.create());
@@ -609,7 +617,7 @@ const Game = {
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
     if (this.state !== 'playing' && this.state !== 'paused') return;
-    document.getElementById('lockhint').classList.toggle('show', !Input.locked && !this.touch && this.state === 'playing');
+    document.getElementById('lockhint').classList.toggle('show', !Input.locked && !this.touch && !Pad.active && this.state === 'playing');
     // Sikte.
     ctx.strokeStyle = 'rgba(235,245,255,0.8)';
     ctx.lineWidth = 1.5;
@@ -627,7 +635,7 @@ const Game = {
     ctx.fillRect(20, 35, 222 * p.light / p.stats.maxLight, 10);
     // Gravitationskompass: pil som visar Lashingens riktning relativt kameran.
     const gx = V3.dot(p.g, Camera.right), gy = -V3.dot(p.g, Camera.up), gz = V3.dot(p.g, Camera.fwd);
-    const cx = w - 60, cy = h - 60;
+    const cx = this.touch ? 56 : w - 60, cy = this.touch ? 150 : h - 60;
     ctx.fillStyle = 'rgba(20,16,12,0.45)';
     ctx.beginPath(); ctx.arc(cx, cy, 34, 0, TAU); ctx.fill();
     ctx.strokeStyle = p.lashed ? '#bfe6ff' : 'rgba(240,230,210,0.7)';
@@ -657,7 +665,7 @@ const Game = {
     // Bossens livmätare.
     const boss = Bosses.boss;
     if (boss && !boss.dead) {
-      const bw = Math.min(560, w * 0.6), bx = (w - bw) / 2, by = h - 70;
+      const bw = Math.min(560, w * (this.touch ? 0.42 : 0.6)), bx = (w - bw) / 2, by = this.touch ? 40 : h - 70;
       ctx.fillStyle = 'rgba(20,14,10,0.65)';
       ctx.fillRect(bx - 4, by - 4, bw + 8, 20);
       ctx.fillStyle = boss.invulnerable ? '#7a6a6a' : '#c8402a';
@@ -673,7 +681,7 @@ const Game = {
     // Förmågor och nedkylning.
     const abil = [['R', 'full', 'Full Lashing'], ['F', 'lashEnemy', 'Lasha fiende'], ['G', 'spear', 'Spjut'], ['C', 'wind', 'Vindkallelse']];
     let ax = w - 290;
-    for (const a of abil) {
+    for (const a of (this.touch ? [] : abil)) {
       const on = Progression.has(a[1]);
       ctx.fillStyle = on ? 'rgba(20,16,12,0.55)' : 'rgba(20,16,12,0.25)';
       ctx.fillRect(ax, h - 40, 52, 26);
@@ -687,17 +695,29 @@ const Game = {
     ctx.textAlign = 'left';
     ctx.fillStyle = '#d4af4a';
     ctx.font = 'italic 13px Georgia';
-    ctx.fillText(IDEALS[Progression.ideal - 1].title + ' · ' + this.stageCfg.region.name + ' – ' + this.stageCfg.name, 20, 92);
+    ctx.fillText(IDEALS[Progression.ideal - 1].title + ' · ' + this.stageCfg.region.name + ' – ' + this.stageCfg.name, 20, this.touch ? 70 : 92);
     // Lirras repliker.
     if (Spren.lirra.speech) {
       ctx.globalAlpha = Math.min(1, Spren.lirra.speechT * 2);
-      ctx.font = 'italic 16px Georgia';
+      ctx.font = 'italic ' + (w < 900 ? 13 : 16) + 'px Georgia';
       ctx.textAlign = 'center';
-      const tw = Math.min(w - 40, ctx.measureText('Lirra: ' + Spren.lirra.speech).width + 40);
+      // Radbryt långa repliker så att de får plats på smala skärmar.
+      const maxW = Math.min(w - 60, 760), fs = w < 900 ? 13 : 16, lh = fs + 6;
+      const lines = [];
+      let cur = 'Lirra:';
+      for (const word of Spren.lirra.speech.split(' ')) {
+        if (ctx.measureText(cur + ' ' + word).width > maxW) { lines.push(cur); cur = word; } else cur += ' ' + word;
+      }
+      lines.push(cur);
+      let tw = 0;
+      for (const l of lines) tw = Math.max(tw, ctx.measureText(l).width);
+      tw += 40;
+      const boxH = lines.length * lh + 14;
+      const ly = this.touch ? 102 : h - 98 - boxH;
       ctx.fillStyle = 'rgba(16,22,34,0.6)';
-      ctx.fillRect(w / 2 - tw / 2, h - 132, tw, 34);
+      ctx.fillRect(w / 2 - tw / 2, ly, tw, boxH);
       ctx.fillStyle = '#d8ecff';
-      ctx.fillText('Lirra: ' + Spren.lirra.speech, w / 2, h - 110, w - 60);
+      lines.forEach((l, i) => ctx.fillText(l, w / 2, ly + 7 + fs + i * lh));
       ctx.globalAlpha = 1;
       ctx.textAlign = 'left';
     }
@@ -707,10 +727,10 @@ const Game = {
     ctx.font = 'italic 14px Georgia';
     if (Storm.state === 'warning') {
       ctx.fillStyle = '#dbe7ff';
-      ctx.fillText('Highstormen om ' + Math.ceil(Storm.timer) + ' s', 20, 72);
+      ctx.fillText('Highstormen om ' + Math.ceil(Storm.timer) + ' s', 20, this.touch ? 88 : 72);
     } else if (Storm.state === 'active') {
       ctx.fillStyle = p.inShelter ? '#bfe6ff' : '#ffb0a0';
-      ctx.fillText(Storm.contains(p.pos[0]) ? (p.inShelter ? 'I lä – Stormlight fyller dig' : 'Utsatt för stormen!') : 'Highstormen drar fram', 20, 72);
+      ctx.fillText(Storm.contains(p.pos[0]) ? (p.inShelter ? 'I lä – Stormlight fyller dig' : 'Utsatt för stormen!') : 'Highstormen drar fram', 20, this.touch ? 88 : 72);
     }
     const b = this.state === 'playing' ? this.banner : null;
     if (b) {
@@ -720,9 +740,10 @@ const Game = {
       ctx.shadowColor = 'rgba(0,0,0,0.6)';
       ctx.shadowBlur = 8;
       ctx.font = 'bold ' + Math.round(Math.min(42, w / 14)) + 'px Georgia';
-      ctx.fillText(b.text, w / 2, h * 0.26);
+      const by = h * (this.touch ? 0.47 : 0.26);
+      ctx.fillText(b.text, w / 2, by);
       ctx.font = 'italic 17px Georgia';
-      ctx.fillText(b.sub, w / 2, h * 0.26 + 34);
+      ctx.fillText(b.sub, w / 2, by + 34);
       ctx.shadowBlur = 0;
       ctx.globalAlpha = 1;
     }
@@ -764,6 +785,7 @@ const Game = {
     }
   },
   onPlayerHurt(p, dmg) {
+    Pad.rumble(Math.min(1, 0.3 + dmg / 40), 160);
     const c = p.center(this._c);
     Effects.burst(c[0], c[1], c[2], [1, 0.45, 0.3], 10, 4, 0.5, 0.08, { add: false, grav: 6 });
     Effects.shake(0.3);
@@ -877,10 +899,10 @@ const Game = {
   onBossRoar(e) { Effects.shake(0.4); Sound.play('roar'); },
   onBossEmerge(e) { Effects.shake(0.6); Effects.dust(e.pos[0], e.pos[1], e.pos[2], 40, 6); },
   onBossBite() {},
-  onBossSlam() { Sound.play('bossSlam'); },
+  onBossSlam() { Sound.play('bossSlam'); Pad.rumble(0.8, 260); },
   onBossThrow() { Sound.play('swingHeavy'); },
   onBossCurse() { Sound.play('thunderCharge'); },
-  onCursed(p) { const c = p.center(this._c); Effects.burst(c[0], c[1], c[2], [0.9, 0.3, 1], 30, 6, 0.8, 0.1); this.showBanner('Din gravitation har Lashats!', 'Tryck Q för att ta tillbaka den', '#e0a0ff', 2); },
+  onCursed(p) { const c = p.center(this._c); Effects.burst(c[0], c[1], c[2], [0.9, 0.3, 1], 30, 6, 0.8, 0.1); this.showBanner('Din gravitation har Lashats!', 'Tryck ' + (Pad.active ? 'vänster på styrkorset' : this.touch ? 'Åter' : 'Q') + ' för att ta tillbaka den', '#e0a0ff', 2); },
   onLocked(key) { this.showBanner('Ej upplåst ännu', 'Svär fler Ideal för att låsa upp förmågan', '#d8c8a8', 1.6); },
   onFullLashing(c, n) {
     Sound.play('full'); Effects.burst(c[0], c[1] - 0.8, c[2], [0.85, 0.95, 1], 50, 12, 0.6, 0.12); Effects.shake(0.3); },

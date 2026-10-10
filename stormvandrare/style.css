@@ -49,7 +49,7 @@ canvas#hud { pointer-events: none; }
   position: fixed;
   inset: 0;
   display: none;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
   padding: 16px;
   z-index: 10;
@@ -160,3 +160,35 @@ body[data-state="playing"] #lockhint.show { display: block; }
   .page { padding: 22px 18px; }
   .page.side { margin: auto; }
 }
+
+/* ===== Pekskärm (js/touch.js) ===== */
+#touch { position: fixed; inset: 0; z-index: 4; display: none; touch-action: none; }
+body.touch[data-state="playing"] #touch { display: block; }
+#tstick { position: absolute; left: 0; top: 0; width: 112px; height: 112px; border-radius: 50%; border: 2px solid rgba(232, 244, 255, 0.35); background: rgba(16, 22, 34, 0.25); opacity: 0; pointer-events: none; transition: opacity 0.15s; }
+#tstick.on { opacity: 1; }
+#tknob { position: absolute; left: 32px; top: 32px; width: 48px; height: 48px; border-radius: 50%; background: radial-gradient(circle at 40% 35%, rgba(240, 250, 255, 0.85), rgba(150, 200, 255, 0.45)); box-shadow: 0 0 14px rgba(170, 215, 255, 0.6); }
+.tb {
+  position: absolute; width: 60px; height: 60px; border-radius: 50%;
+  border: 2px solid rgba(232, 220, 190, 0.55); background: rgba(24, 18, 12, 0.42);
+  color: #f3e6c8; font: italic 13px Georgia, serif; padding: 0; touch-action: none;
+  text-shadow: 0 1px 3px #000; -webkit-user-select: none; user-select: none;
+}
+.tb.on { background: rgba(170, 215, 255, 0.4); border-color: #e4f4ff; transform: scale(0.94); }
+.tattack { right: calc(18px + env(safe-area-inset-right)); bottom: 18px; width: 86px; height: 86px; font-size: 16px; border-color: rgba(200, 230, 255, 0.7); }
+.tjump { right: calc(118px + env(safe-area-inset-right)); bottom: 12px; }
+.tlash { right: calc(18px + env(safe-area-inset-right)); bottom: 116px; border-color: rgba(190, 225, 255, 0.75); }
+.tdash { right: calc(100px + env(safe-area-inset-right)); bottom: 90px; width: 54px; height: 54px; }
+.tdown { right: calc(188px + env(safe-area-inset-right)); bottom: 12px; width: 50px; height: 50px; }
+.treset { right: calc(22px + env(safe-area-inset-right)); bottom: 190px; width: 50px; height: 50px; }
+.tpause { top: 12px; right: calc(14px + env(safe-area-inset-right)); width: 44px; height: 44px; font-style: normal; font-weight: bold; }
+#tabil { position: absolute; top: 12px; right: calc(70px + env(safe-area-inset-right)); display: flex; gap: 8px; }
+#tabil .tb { position: relative; width: 50px; height: 50px; font-size: 11px; overflow: hidden; }
+#tabil .tb::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: var(--cd, 0%); background: rgba(140, 190, 255, 0.35); pointer-events: none; }
+#tabil .tb.off { opacity: 0.3; }
+@media (max-height: 420px) {
+  .treset { bottom: 180px; }
+  #tabil .tb { width: 44px; height: 44px; }
+}
+
+/* Centrera sidan men låt den skrolla när skärmen är låg. */
+#ui > .page { margin-top: auto; margin-bottom: auto; }

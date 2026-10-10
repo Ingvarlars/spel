@@ -261,6 +261,16 @@ const UI = {
       k('<kbd>Mellanslag</kbd> / <kbd>Shift</kbd>', 'Hopp / Stormlight-rusning') +
       k('<kbd>R</kbd> <kbd>F</kbd> <kbd>G</kbd> <kbd>C</kbd>', 'Full Lashing, Lasha fiende, spjut, vindkallelse (låses upp av Ideal)') +
       k('<kbd>Esc</kbd> / <kbd>M</kbd>', 'Paus / ljud av') +
+      '</div><h3>Handkontroll</h3><div class="keys">' +
+      k('Vänster / höger spak', 'Gå / titta') +
+      k('A / X (RT)', 'Hopp / hugg (håll in för kombo)') +
+      k('LT / LB / B', 'Lasha mot siktet / Lasha nedåt / rusning') +
+      k('RB / Y / styrkorset', 'Full Lashing / spjut / vind, fiende och återställ') +
+      k('Start', 'Paus (styrkorset och A styr menyerna)') +
+      '</div><h3>Pekskärm</h3><div class="keys">' +
+      k('Vänster sida', 'Dra för att gå') +
+      k('Höger sida', 'Dra för att titta') +
+      k('Knapparna', 'Hugg, Lash, Hopp, Rusa, Ned och Åter; förmågorna längst upp') +
       '</div><div class="btns row"><button class="btn primary" data-act="back">Tillbaka</button></div>');
   },
 };

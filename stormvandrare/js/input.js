@@ -12,7 +12,8 @@ const Input = {
   locked: false,
   canvas: null,
   mouseDown: [false, false, false],
-  touchMove: null,   // { x, y } från virtuell joystick (steg 8)
+  touchMove: null,   // { x, y } från virtuell joystick (js/touch.js)
+  padMove: null,     // { x, y } från handkontrollens vänstra spak (js/gamepad.js)
 
   init(canvas) {
     this.canvas = canvas;
@@ -83,7 +84,6 @@ const Input = {
 
   // Rörelse: x = höger, y = framåt (längd 0..1).
   readMove(out) {
-    if (this.touchMove) { out.x = this.touchMove.x; out.y = this.touchMove.y; return out; }
     const k = this.keys;
     let x = 0, y = 0;
     if (k.KeyA) x -= 1;
@@ -92,6 +92,10 @@ const Input = {
     if (k.KeyS) y -= 1;
     const l = Math.hypot(x, y);
     if (l > 1) { x /= l; y /= l; }
+    if (!l) {
+      const m = this.touchMove || this.padMove;
+      if (m) { x = m.x; y = m.y; }
+    }
     out.x = x; out.y = y;
     return out;
   },

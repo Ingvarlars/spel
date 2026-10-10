@@ -104,7 +104,13 @@ F = Lasha fiende, G/mittenklick = spjut, C = vindkallelse, piltangenter = kamera
       en etapp om scenariot inte sätter `module.exports.menu = true`.
       `test/menu.js` går igenom alla skärmar och kontrollerar sparningen,
       `test/codex.js` visar skisserna.
-- [ ] Steg 8: mobil (joystick, kamera-drag, knappar) och handkontroll (Gamepad API).
+- [x] Steg 8: `js/touch.js` (`TouchControls`: virtuell joystick på vänster sida,
+      kameradrag på höger, knappar för hugg/Lash/hopp/rusning/ned/åter, förmågor
+      med nedkylning, paus; HUD flyttas undan på pekskärm) och `js/gamepad.js`
+      (`Pad`: standardlayout, spakar med död zon, håll in för kombo, vibration,
+      menystyrning med styrkorset/A/B). Generösare auto-sikte på pekskärm och
+      handkontroll. Lirras introduktion anpassas efter styrsättet.
+      `test/touch.js` och `test/gamepad.js` (emulerad Gamepad API).
 - [ ] Steg 9: balans (just nu för många kremlingar per platå), prestanda,
       länk från startsidan `index.html`, README (hur man spelar), PR mot `main`.
 
