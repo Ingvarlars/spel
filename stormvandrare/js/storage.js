@@ -15,7 +15,7 @@ function defaultSave() {
     settings: {
       volume: 0.7, music: 0.55, sfx: 0.9, muted: false,
       sensitivity: 1, invertY: false, fov: 66, quality: 'high', shadows: true, bloom: true,
-      particles: 1, numbers: true, shake: true, showFps: false,
+      particles: 1, numbers: true, shake: true, showFps: false, minimap: true,
     },
   };
 }

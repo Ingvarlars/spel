@@ -192,3 +192,4 @@ body.touch[data-state="playing"] #touch { display: block; }
 
 /* Centrera sidan men låt den skrolla när skärmen är låg. */
 #ui > .page { margin-top: auto; margin-bottom: auto; }
+body[data-state="playing"]:not(.touch) #toasts { right: 176px; }

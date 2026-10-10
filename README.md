@@ -107,55 +107,119 @@ Om lagringen är avstängd fungerar spelet ändå, men inget sparas.
 
 ## Stormvandrare
 
-Ett stort 2D-actionspel från sidan i mappen `stormvandrare/`, ett ideellt fanspel
-som utspelar sig i världen från Brandon Sandersons *The Stormlight Archive*.
+Ett stort 3D-actionspel i tredje person i mappen `stormvandrare/`, ett ideellt
+fanspel som utspelar sig i världen från Brandon Sandersons *The Stormlight
+Archive*. Öppna `stormvandrare/index.html` i en webbläsare med WebGL2 (aktuell
+Chrome, Firefox, Edge eller Safari) eller följ länken från startsidan.
 
 > **Friskrivning:** Stormvandrare är ett icke-kommersiellt fanprojekt utan koppling
 > till Brandon Sanderson, Dragonsteel eller förlagen. Världens namn och begrepp
-> tillhör sina upphovspersoner. Huvudpersonen, följeslagaren, alla texter, all grafik,
-> allt ljud och all kod är egna. Spelet får inte säljas.
+> tillhör sina upphovspersoner. Huvudpersonen Arin, följeslagaren Lirra, alla texter,
+> all grafik, allt ljud och all kod är egna. Spelet får inte säljas.
 
-Du är en ung Windrunner-väpnare på de Splittrade slätterna som under en highstorm
-knyts samman med honorsprenen **Lirra**. Bandet ger dig **Stormlight**: ljus som
-läker dig och låter dig ändra din egen gravitation med **Lashings**, framkalla en
-**Shardblade** och svära nya **Ideal** som väcker starkare förmågor. Ta dig över
-platåerna och ned i klyftorna, sök lä när highstormen drar fram och besegra
-chasmfiends och värre för att skörda deras gemhearts.
+Du är Arin, en ung löpare på de Splittrade slätterna som under en
+highstorm knyts samman med honorsprenen **Lirra**. Bandet ger dig **Stormlight**:
+ljus som läker dig och låter dig ändra din egen gravitation med **Lashings**,
+framkalla en **Shardblade** och svära nya **Ideal** som väcker starkare förmågor.
+Flyg mellan platåerna, sök lä när highstormen drar fram och besegra chasmfiends
+och värre för att skörda deras gemhearts.
 
-### Arkitektur (plan)
+### Så spelar du
 
-Vanlig HTML, CSS och JavaScript med `<canvas>`, inga bibliotek och vanliga
-`<script>`-taggar (fungerar via `file://` och GitHub Pages). Spelet delar ingen kod
-med de andra spelen.
+Varje etapp är en kedja av platåer över djupa klyftor. Målet ligger österut på en
+stor arenaplatå. Där väntar väktare eller en boss, och etappen är klar när du tar
+gemhearten. Stormlight är både bränsle och liv. Det läker dig, men varje Lashing och
+rusning kostar ljus, och tar det slut medan du flyger faller du. Andas in ljus från
+laddade **sfärer** (chip, mark och broam i sex ädelstensfärger). När highstormen
+kommer laddas slocknade sfärer igen, men stormen gör ont om du inte står i lä bakom
+en klippa.
+
+| Handling | Tangentbord och mus | Handkontroll | Pekskärm |
+| --- | --- | --- | --- |
+| Gå / styr i luften | WASD | Vänster spak | Dra på vänster sida |
+| Titta | Mus (klicka för att fånga den), piltangenter | Höger spak | Dra på höger sida |
+| Hugg med Shardblade (tre i rad = avslut) | Vänsterklick | X eller RT (håll in) | Hugg (håll in) |
+| Lasha dig mot siktet (upprepa = snabbare) | Högerklick eller V | LT | Lash |
+| Lasha nedåt (nedslag) | E | LB | Ned |
+| Ta tillbaka vanlig gravitation | Q | Styrkorset vänster | Åter |
+| Hopp / Stormlight-rusning | Mellanslag / Shift | A / B | Hopp / Rusa |
+| Full Lashing, Lasha fiende, spjut, vindkallelse | R, F, G (mittenklick), C | RB, styrkorset höger, Y, styrkorset upp | Knapparna längst upp |
+| Karta | Tab | Back | Karta |
+| Paus / ljud av | Esc eller P / M | Start | II |
+
+Med handkontroll styr du menyerna med styrkorset, A och B. På pekskärm och med
+handkontroll siktar Shardbladen och spjutet lite mer generöst.
+
+#### Kampanjen
+
+Fyra regioner med tre etapper var. Den sista etappen i varje region har en boss
+med tre faser:
+
+| Region | Miljö | Boss |
+| --- | --- | --- |
+| De Splittrade slätterna | Varma sandstensplatåer, broar och stenspiror | Chasmfiend, som klättrar upp ur klyftan |
+| Klyftornas djup | Gröna klyftbottnar under platåerna | Vev-Tarun, en himmelsk Fused |
+| Frostlanden | Snö, is och gles dimma | Thunderclast, det vandrande berget |
+| Ursprunget | Svävande öar och den röda Everstormen | Everstormens härold |
+
+Efter varje boss svär du nästa **Ideal**. Det låser upp Full Lashing och Lasha
+fiende, Shardblade-spjut, Stormlight-rustning med en fjärde Lashing och till sist
+vindkallelse. Sfärer du samlar blir valuta i **lägret**, där du köper färdigheter i
+fyra grenar (Vind, Klinga, Stormlight och Kropp). Efter kampanjen väntar den
+**oändliga expeditionen** med allt svårare slumpade etapper och ett rekord.
+
+**Fiender:** kremlingar, Parshendi-krigare, -bågskyttar och -sköldbärare,
+stormform som slungar röd blixt, flygande Fused, voidspren som suger Stormlight och
+stenbjässar. Varje varelse du möter tecknas i **skissboken** med en procedurell
+bläckteckning, tillsammans med anteckningar, 14 prestationer och statistik.
+
+**Sparning:** framsteg, Ideal, färdigheter, skissbok, rekord och inställningar
+sparas i `localStorage`. I inställningarna finns volym, musik, ljudeffekter,
+muskänslighet, inverterad höjdled, synfält, grafikkvalitet, skuggor, glöd,
+partiklar, skadesiffror, skärmskakning, minikarta och bildfrekvens.
+
+### Arkitektur
+
+Vanlig HTML, CSS och JavaScript med en **egen WebGL2-motor**. Spelet har inga
+bibliotek och inga byggverktyg, och filerna laddas med vanliga `<script>`-taggar,
+så det fungerar via `file://` och GitHub Pages.
 
 | Fil | Ansvar |
 | --- | --- |
-| `js/utils.js` | Matte, deterministisk slump, `Pool` (object pooling), konstanter |
-| `js/storage.js` | Sparfil: kampanjframsteg, färdigheter, rekord, prestationer och inställningar (tysta fel) |
-| `js/input.js` | Tangentbord, mus, handkontroll (Gamepad API) och pekskärm |
-| `js/audio.js` | Ljudeffekter med Web Audio API |
-| `js/music.js` | Procedurell musik (drönare, melodi och trummor som skiftar med läget) |
-| `js/world.js` | Procedurgenererade banor (rutnät), kollision, terräng i förrenderade bitar, målad parallaxbakgrund och växter som drar sig undan |
-| `js/regions.js` | Kampanjen: regioner (Splittrade slätterna, klyftorna, Frostlanden m.fl.), etapper, berättelse och Lirras repliker |
-| `js/player.js` | Windrunnern: rörelse relativt egen gravitation, Lashings, Stormlight och läkning |
-| `js/abilities.js` | Shardblade (kombo, skär löst berg), kastspjut, Full Lashing, Stormlight-rustning och vindkallelse |
-| `js/enemies.js` | Fiendetyper och deras beteenden |
-| `js/bosses.js` | Bossar med flera faser |
-| `js/storm.js` | Highstormen: varning, stormmur, vind, lä bakom klippor, flygande bråte och laddning av sfärer |
-| `js/pickups.js` | Sfärer (laddade och slocknade), gemhearts och helande örter |
-| `js/progression.js` | Ideal, välsignelser under en etapp, färdighetsträd i lägret och prestationer |
-| `js/codex.js` | Bestiarie och anteckningar som en skissbok med procedurella bläckteckningar |
-| `js/effects.js` | Partiklar, spren (windspren, painspren, gloryspren m.fl.), skadesiffror och skärmskakning |
-| `js/ui.js` | HUD, minikarta, menyer och skissboksgränssnitt |
-| `js/game.js` | Spel-loop med fast tidssteg, tillstånd, kamera och samordning |
+| `js/engine/math.js` | Vektorer, matriser, brus, deterministisk slump, `Pool` |
+| `js/engine/gl.js` | Shaderprogram, buffertar, `Mesh`, `DynamicMesh` och `MeshBuilder` (lådor, cylindrar, sfärer, loft, ellipsoider) |
+| `js/engine/renderer.js` | Skuggkarta (PCF), målerisk himmel, dimma, punktljus, instansiering, partiklar, band, MSAA, bloom, tonmappning och stormväggens shader |
+| `js/storage.js` | Sparfil i `localStorage` med tysta fel |
+| `js/input.js` | Tangentbord, mus med pekarlås och gemensam rörelse/blick |
+| `js/touch.js` | Virtuell joystick, kameradrag och knappar på pekskärm |
+| `js/gamepad.js` | Handkontroll via Gamepad API, menystyrning och vibration |
+| `js/world.js` | Procedurgenererade platåer (prismor), broar, spiror, klyftor, svävande öar, kollision, strålkastning och gräs |
+| `js/camera.js` | Tredjepersonskamera som följer spelarens gravitation, med kollision och frustumgallring |
+| `js/models.js` | Vapen och varelsemodeller (kremlingar, voidspren, stenbjässar) |
+| `js/character.js` | Mjuka kroppar med fullt skelett, animation och en verlet-simulerad rock |
+| `js/player.js` | Windrunnern: rörelse relativt egen gravitation, Lashings, rusning och Stormlight |
+| `js/abilities.js` | Shardblade (kombo, parering, sikteshjälp, skär löst berg) och förmågorna |
+| `js/enemies.js` | Åtta fiendetyper, projektiler, beteenden och detaljnivåer |
+| `js/bosses.js` | Fyra bossar med träffzoner och faser |
+| `js/storm.js` | Highstorm och Everstorm: varning, stormmur, vind, lä, blixtar och regn |
+| `js/pickups.js` | Sfärer, gemhearts och helande örter |
+| `js/progression.js` | Ideal, förmågor och färdighetsträdet |
+| `js/spren.js` | Lirra och andra spren (windspren, gloryspren, painspren m.fl.) |
+| `js/regions.js` | Regioner, etapper, Lirras repliker och den oändliga expeditionen |
+| `js/codex.js` | Skissbokens varelser, anteckningar och prestationer |
+| `js/sketch.js` | Bläckteckningar av 3D-modellerna (kontur och skraffering) |
+| `js/audio.js`, `js/music.js` | Syntetiserade ljud och procedurell musik |
+| `js/effects.js` | Partiklar, skärmskakning och skadesiffror |
+| `js/ui.js` | Menyer i skissboksstil, karta, läger, skissbok och inställningar |
+| `js/game.js` | Spel-loop med fast tidssteg, tillstånd, HUD, karta och händelser |
 
-**Konststil:** målerisk himmel med dramatiskt ljus och diset djup, varma
-sandstensplatåer och kallt blåvitt Stormlight, inspirerat av stämningen i seriens
-officiella konst utan att kopiera någon bild. Menyerna ser ut som en forskares
-skissbok med pergament, bläck och egna glyfliknande emblem.
+**Konststil:** målerisk himmel med dramatiskt ljus och disigt djup, varma
+sandstensplatåer i skikt och kallt blåvitt Stormlight, inspirerat av stämningen i
+seriens officiella konst utan att kopiera någon bild. Menyerna ser ut som en
+forskares skissbok med pergament, bläck och egna glyfliknande emblem.
 
-**Byggordning:** (1) bana, rörelse, Lashings och kamera, (2) Shardblade och
-fiender, (3) Stormlight, sfärer och highstorm, (4) bossar, etapper och Ideal,
-(5) effekter, spren, ljud och musik, (6) kampanj, karta, läger och färdighetsträd,
-(7) menyer, skissbok och sparning, (8) mobil och handkontroll, (9) balans och
-finputs.
+**Tester:** `node stormvandrare/test/run.js stormvandrare/test/<scenario>.js <katalog>`
+kör ett scenario i headless Chromium (Playwright, WebGL2 via SwiftShader), sparar
+skärmbilder i katalogen och rapporterar konsolfel. Scenarier finns för rök,
+menyer, skissbok, pekskärm, handkontroll, karta, storm, bossar (`BOSS=typ`) och
+regioner.

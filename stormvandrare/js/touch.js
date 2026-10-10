@@ -32,7 +32,7 @@ const TouchControls = {
       b('pause', 'II', 'tpause') +
       '<div id="tabil">' +
         b('full', 'Full', 'small" data-cd="full') + b('lash2', 'Fiende', 'small" data-cd="lashEnemy') +
-        b('spear', 'Spjut', 'small" data-cd="spear') + b('call', 'Vind', 'small" data-cd="wind') +
+        b('spear', 'Spjut', 'small" data-cd="spear') + b('call', 'Vind', 'small" data-cd="wind') + b('map', 'Karta', 'small') +
       '</div>' +
       b('attack', 'Hugg', 'tattack') + b('jump', 'Hopp', 'tjump') + b('lash', 'Lash', 'tlash') +
       b('dash', 'Rusa', 'tdash') + b('lashDown', 'Ned', 'tdown') + b('reset', 'Åter', 'treset');
@@ -57,7 +57,7 @@ const TouchControls = {
         const a = btn.dataset.a;
         btn.classList.add('on');
         this.held[a] = t.identifier;
-        if (a === 'pause') Input.emit('pause');
+        if (a === 'pause' || a === 'map') Input.emit(a);
         else Input.queued[a] = true;
         if (a === 'attack') this.attackRepeat = 0.38;
         continue;

@@ -203,15 +203,17 @@ const World = {
 
   populate(pl, opts, rng, progress) {
     const level = Math.floor(opts.level);
-    const types = [{ w: 3, v: 'crab' }, { w: 4, v: 'warrior' }];
+    const tut = !!opts.tutorial;
+    const types = [{ w: 2.5, v: 'crab' }, { w: 4, v: 'warrior' }];
     if (progress > 0.15 || level > 1) types.push({ w: 2.5, v: 'archer' });
-    if (level >= 2 || progress > 0.5) types.push({ w: 1.5 + level * 0.3, v: 'shield' });
+    if (!tut && (level >= 2 || progress > 0.5)) types.push({ w: 1.5 + level * 0.3, v: 'shield' });
     if (level >= 2) types.push({ w: 1.2 + level * 0.3, v: 'thunder' });
-    if (level >= 2 || progress > 0.6) types.push({ w: 1 + level * 0.4, v: 'hover' });
-    if (level >= 3 || progress > 0.7) types.push({ w: 0.8, v: 'leech' });
+    if (!tut && (level >= 2 || progress > 0.6)) types.push({ w: 1 + level * 0.4, v: 'hover' });
+    if (!tut && (level >= 3 || progress > 0.7)) types.push({ w: 0.8, v: 'leech' });
     if (level >= 3) types.push({ w: 0.6 + level * 0.2, v: 'brute' });
     const total = types.reduce((s, t) => s + t.w, 0);
-    const count = Math.floor(rng() * 1.6 + level * 0.45 + progress * 1.6);
+    // Första etappen är en lugn introduktion; sedan ökar tätheten med nivå och avstånd.
+    const count = tut ? Math.floor(rng() * 1.1 + progress * 0.9) : Math.floor(rng() * 1.4 + level * 0.35 + progress * 1.3);
     for (let k = 0; k < count; k++) {
       let roll = rng() * total, type = types[0].v;
       for (const t of types) { roll -= t.w; if (roll <= 0) { type = t.v; break; } }
@@ -220,7 +222,7 @@ const World = {
       const elite = rng() < 0.04 + level * 0.02;
       const y = (type === 'hover' || type === 'leech') ? pl.y1 + 8 : pl.y1 + 0.1;
       this.spawns.push({ type, x, y, z, elite, home: pl });
-      if (type === 'crab' && rng() < 0.5) this.spawns.push({ type, x: x + rng() * 4, y, z: z + rng() * 4, home: pl });
+      if (type === 'crab' && rng() < 0.35) this.spawns.push({ type, x: x + rng() * 4, y, z: z + rng() * 4, home: pl });
     }
     for (let k = 0; k < randInt2(rng, 1, 3); k++) {
       const a = rng() * TAU, d = rng() * pl.radius * 0.75;

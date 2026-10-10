@@ -111,8 +111,16 @@ F = Lasha fiende, G/mittenklick = spjut, C = vindkallelse, piltangenter = kamera
       menystyrning med styrkorset/A/B). Generösare auto-sikte på pekskärm och
       handkontroll. Lirras introduktion anpassas efter styrsättet.
       `test/touch.js` och `test/gamepad.js` (emulerad Gamepad API).
-- [ ] Steg 9: balans (just nu för många kremlingar per platå), prestanda,
-      länk från startsidan `index.html`, README (hur man spelar), PR mot `main`.
+- [x] Steg 9: balans (lugn introduktion med ~16 fiender, sedan gradvis upp mot
+      ~120 i sista etappen; färre kremlingar), minikarta och hela kartan med Tab
+      (`test/map.js`), länk från startsidan, README med hur man spelar och
+      kontroller, PR mot `main`.
+
+## Idéer framåt
+
+- Fler bosstyper och regioner (t.ex. Kholinar, Urithiru) och fler Ideal-vägar.
+- Fler spren-varianter och väderhändelser (t.ex. weeping-regn).
+- Kontrollschema som kan ändras i inställningarna.
 
 ## Testa
 

@@ -87,6 +87,7 @@ const UI = {
     const sx = cv.width / (b.x1 - b.x0), sz = cv.height / (b.z1 - b.z0), s = Math.min(sx, sz) * 0.95;
     const ox = (cv.width - (b.x1 - b.x0) * s) / 2, oz = (cv.height - (b.z1 - b.z0) * s) / 2;
     const P = (x, z) => [ox + (x - b.x0) * s, oz + (z - b.z0) * s];
+    cv.mapP = P; cv.mapS = s;
     g.clearRect(0, 0, cv.width, cv.height);
     g.lineJoin = 'round';
     for (const pr of World.prisms) {
@@ -234,7 +235,7 @@ const UI = {
       '<label class="setting"><span>Grafikkvalitet</span><select data-key="quality"><option value="high"' + (s.quality === 'high' ? ' selected' : '') + '>Hög</option><option value="medium"' + (s.quality === 'medium' ? ' selected' : '') + '>Mellan</option><option value="low"' + (s.quality === 'low' ? ' selected' : '') + '>Låg (snabbast)</option></select></label>' +
       check('shadows', 'Skuggor') + check('bloom', 'Glöd (bloom)') +
       range('particles', 'Mängd partiklar', 0.2, 1, 0.1, s.particles) +
-      check('numbers', 'Skadesiffror') + check('shake', 'Skärmskakning') + check('showFps', 'Visa bildfrekvens') +
+      check('numbers', 'Skadesiffror') + check('shake', 'Skärmskakning') + check('minimap', 'Minikarta (Tab visar hela kartan)') + check('showFps', 'Visa bildfrekvens') +
       '<div class="btns row"><button class="btn primary" data-act="back">Tillbaka</button><button class="btn" data-act="resetSave">Radera sparfilen</button></div>', 'narrow');
     page.querySelectorAll('[data-key]').forEach((inp) => {
       const h = () => {

@@ -47,6 +47,7 @@ const Game = {
     window.addEventListener('pointerdown', unlock);
     Input.on('mute', () => { const s = Save.data.settings; s.muted = !s.muted; this.applySettings(); Save.save(); this.toast(s.muted ? 'Ljudet är avstängt' : 'Ljudet är på', 'Tryck M för att växla'); });
     Input.on('pause', () => this.onPauseKey());
+    Input.on('map', () => { if (this.state === 'playing') this.mapOpen = !this.mapOpen; });
     Input.on('unlock', () => { if (this.state === 'playing' && !this.touch && !Pad.active) this.pause(); });
     TouchControls.init(this);
     Pad.init(this);
@@ -255,7 +256,7 @@ const Game = {
     this.stageSeed = seed;
     this.deathTimer = 0;
     this.showResults = 0;
-    World.generate({ level, length: cfg.length, theme: cfg.theme }, seed);
+    World.generate({ level, length: cfg.length, theme: cfg.theme, tutorial: cfg.tutorial }, seed);
     this.env = this.makeEnv(cfg.theme);
     if (Sound.ctx) Music.setKey(cfg.music[0], cfg.music[1]);
     this.time = 0;
@@ -288,8 +289,101 @@ const Game = {
     V3.set(p.facing, 1, 0, 0);
     Camera.reset(V3.create(0, 1, 0), V3.create(1, 0, 0));
     Input.clearQueue();
+    this.mapOpen = false;
+    this.mapImg = null;
     if (!noPlay) this.setState('playing');
     if (!Campaign.endless && !this.menuWorld) this.saveProgress();
+  },
+
+  // Kartan ritas som en skissbokssida en gång per etapp (pergament + bläck).
+  buildMap() {
+    const b = World.bounds;
+    const cv = document.createElement('canvas');
+    cv.width = 1400;
+    cv.height = Math.max(200, Math.round(1400 * (b.z1 - b.z0) / (b.x1 - b.x0)));
+    const g = cv.getContext('2d');
+    g.fillStyle = '#e8dcc0';
+    g.fillRect(0, 0, cv.width, cv.height);
+    UI.drawMap(cv);
+    // drawMap rensar duken; lägg pergamentet bakom bläcket.
+    g.globalCompositeOperation = 'destination-over';
+    const grad = g.createRadialGradient(cv.width / 2, cv.height / 2, 10, cv.width / 2, cv.height / 2, cv.width * 0.6);
+    grad.addColorStop(0, '#efe4c8'); grad.addColorStop(1, '#d6c49c');
+    g.fillStyle = grad;
+    g.fillRect(0, 0, cv.width, cv.height);
+    g.globalCompositeOperation = 'source-over';
+    this.mapImg = cv;
+    return cv;
+  },
+
+  // Markörer på kartan: spelaren (pil i blickriktningen), målet, bossen och stormen.
+  drawMapMarks(ctx, P, s, ox, oy, k) {
+    const p = this.player;
+    if (Storm.state !== 'calm') {
+      const b = World.bounds;
+      const a = P(Storm.wallX, b.z0), z = P(Storm.wallX, b.z1);
+      ctx.strokeStyle = Storm.dir > 0 ? 'rgba(60,110,190,0.8)' : 'rgba(190,50,40,0.8)';
+      ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(ox + a[0] * k, oy + a[1] * k); ctx.lineTo(ox + z[0] * k, oy + z[1] * k); ctx.stroke();
+    }
+    const boss = Bosses.boss;
+    if (boss && !boss.dead) {
+      const q = P(boss.pos[0], boss.pos[2]);
+      ctx.fillStyle = '#9a2a1a';
+      ctx.beginPath(); ctx.arc(ox + q[0] * k, oy + q[1] * k, 6, 0, TAU); ctx.fill();
+    }
+    const q = P(p.pos[0], p.pos[2]);
+    const x = ox + q[0] * k, y = oy + q[1] * k;
+    const f = Camera.fwd, fl = Math.hypot(f[0], f[2]) || 1;
+    const fx = f[0] / fl, fz = f[2] / fl;
+    ctx.fillStyle = '#2a5a9a';
+    ctx.strokeStyle = '#f3ecd8';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(x + fx * 10, y + fz * 10);
+    ctx.lineTo(x - fx * 6 - fz * 6, y - fz * 6 + fx * 6);
+    ctx.lineTo(x - fx * 6 + fz * 6, y - fz * 6 - fx * 6);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+  },
+
+  drawMinimap(ctx, w) {
+    const img = this.mapImg || this.buildMap();
+    const P = img.mapP, s = img.mapS, p = this.player;
+    const R = 70, cx = w - R - 18, cy = R + 18;
+    const q = P(p.pos[0], p.pos[2]);
+    const k = 1.1 / s;   // ungefär 1,1 px per meter
+    ctx.save();
+    ctx.beginPath(); ctx.arc(cx, cy, R, 0, TAU); ctx.clip();
+    ctx.globalAlpha = 0.9;
+    ctx.drawImage(img, cx - q[0] * k, cy - q[1] * k, img.width * k, img.height * k);
+    ctx.globalAlpha = 1;
+    this.drawMapMarks(ctx, P, s, cx - q[0] * k, cy - q[1] * k, k);
+    ctx.restore();
+    ctx.strokeStyle = 'rgba(43,29,18,0.9)';
+    ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(cx, cy, R, 0, TAU); ctx.stroke();
+    ctx.fillStyle = '#f3e6c8';
+    ctx.font = 'italic 12px Georgia';
+    ctx.textAlign = 'center';
+    ctx.fillText('Ö →', cx + R - 14, cy + R + 14);
+    ctx.textAlign = 'left';
+  },
+
+  drawBigMap(ctx, w, h) {
+    const img = this.mapImg || this.buildMap();
+    const k = Math.min((w - 60) / img.width, (h - 120) / img.height);
+    const dw = img.width * k, dh = img.height * k, ox = (w - dw) / 2, oy = (h - dh) / 2;
+    ctx.fillStyle = 'rgba(10,14,22,0.55)';
+    ctx.fillRect(0, 0, w, h);
+    ctx.shadowColor = 'rgba(0,0,0,0.5)'; ctx.shadowBlur = 20;
+    ctx.drawImage(img, ox, oy, dw, dh);
+    ctx.shadowBlur = 0;
+    this.drawMapMarks(ctx, img.mapP, img.mapS, ox, oy, k);
+    ctx.fillStyle = '#f3e6c8';
+    ctx.font = 'italic 15px Georgia';
+    ctx.textAlign = 'center';
+    ctx.fillText(this.stageCfg.region.name + ' – ' + this.stageCfg.name + '   ·   ' + (this.touch ? 'tryck Karta' : Pad.active ? 'tryck Back' : 'tryck Tab') + ' för att stänga', w / 2, oy - 14);
+    ctx.textAlign = 'left';
   },
 
   loop(t) {
@@ -747,6 +841,8 @@ const Game = {
       ctx.shadowBlur = 0;
       ctx.globalAlpha = 1;
     }
+    if (!this.touch && !this.mapOpen && Save.data.settings.minimap !== false) this.drawMinimap(ctx, w);
+    if (this.mapOpen && this.state === 'playing') this.drawBigMap(ctx, w, h);
   },
 
   // --- Händelser (fylls på i senare steg) ---
