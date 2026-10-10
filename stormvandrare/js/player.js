@@ -12,18 +12,18 @@ function basePlayerStats() {
     maxLight: 100,
     speed: 7.5,
     jump: 9.5,
-    lashCost: 4,
-    lashDrain: 1.2,
+    lashCost: 2,
+    lashDrain: 0.45,
     maxLashes: 3,
     healRate: 18,
-    healCost: 0.34,
-    leak: 0.35,
-    dashCost: 8,
+    healCost: 0.2,
+    leak: 0,
+    dashCost: 4,
     bladeDamage: 30,
     bladeSpeed: 1,
     bladeReach: 1,
     armor: 0,
-    drawRange: 7,
+    drawRange: 12,
   };
 }
 
@@ -226,6 +226,11 @@ class Player {
         this.hp += heal;
         this.light -= heal * s.healCost;
       }
+    }
+    // Lirra delar med sig: Stormlight fylls långsamt på när man står på marken,
+    // och snabbare när man nästan är tom, så att man aldrig blir helt utan.
+    if (ground && this.alive && this.light < s.maxLight * 0.5) {
+      this.light += (this.light < s.maxLight * 0.2 ? 6 : 2.5) * dt;
     }
     this.light = Math.min(this.light, s.maxLight);
 
