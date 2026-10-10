@@ -1,0 +1,1038 @@
+'use strict';
+// Spel-loop med fast tidssteg, tillstånd och samordning av alla system.
+
+const Game = {
+  glCanvas: null,
+  hud: null,
+  hctx: null,
+  w: 1, h: 1, dpr: 1,
+  renderScale: 1,
+  state: 'loading',
+  time: 0,
+  realTime: 0,
+  tick: 0,
+  acc: 0,
+  last: 0,
+  fps: 60,
+  player: new Player(),
+  env: null,
+  stormDark: 0,
+  level: 1,
+  stageBoss: null,
+  bossSpawned: false,
+  complete: false,
+  mods: { hp: 1, dmg: 1, speed: 1 },
+  stats: null,
+  _aim: V3.create(),
+  _aimTick: -1,
+  _c: V3.create(),
+  _p2: new Float32Array(2),
+
+  init() {
+    this.glCanvas = document.getElementById('gl');
+    this.hud = document.getElementById('hud');
+    this.hctx = this.hud.getContext('2d');
+    if (!Renderer.init(this.glCanvas)) {
+      document.getElementById('nogl').hidden = false;
+      return;
+    }
+    window.addEventListener('resize', () => this.resize());
+    this.resize();
+    Input.init(this.glCanvas);
+    UI.init();
+    Save.load();
+    this.applySettings();
+    const unlock = () => Sound.unlock();
+    window.addEventListener('keydown', unlock);
+    window.addEventListener('pointerdown', unlock);
+    Input.on('mute', () => { const s = Save.data.settings; s.muted = !s.muted; this.applySettings(); Save.save(); this.toast(s.muted ? 'Ljudet är avstängt' : 'Ljudet är på', 'Tryck M för att växla'); });
+    Input.on('pause', () => this.onPauseKey());
+    Input.on('map', () => { if (this.state === 'playing') this.mapOpen = !this.mapOpen; });
+    Input.on('unlock', () => { if (this.state === 'playing' && !this.touch && !Pad.active) this.pause(); });
+    TouchControls.init(this);
+    Pad.init(this);
+    Input.on('blur', () => this.pause());
+    document.addEventListener('visibilitychange', () => { if (document.hidden) this.pause(); });
+    this.glCanvas.addEventListener('click', () => { if (this.state === 'playing') Input.requestLock(); });
+    // Ladda kampanjens framsteg och visa huvudmenyn med slätterna i bakgrunden.
+    const c = Save.data.campaign;
+    Campaign.region = clamp(c.region, 0, REGIONS.length - 1);
+    Campaign.stage = clamp(c.stage, 0, REGIONS[Campaign.region].stages.length - 1);
+    Progression.ideal = c.ideal;
+    Progression.wealth = Save.data.progress.wealth;
+    Progression.skills = Save.data.progress.skills;
+    this.showMenu();
+    requestAnimationFrame((t) => { this.last = t; this.loop(t); });
+  },
+
+  // --- Inställningar ---
+  applySettings() {
+    const s = Save.data.settings;
+    Sound.volume = s.volume; Sound.musicVolume = s.music; Sound.sfxVolume = s.sfx; Sound.muted = s.muted;
+    Sound.applyVolume();
+    Input.sensitivity = 0.0023 * s.sensitivity;
+    Input.invertY = s.invertY;
+    Camera.fov = s.fov * Math.PI / 180 * 1.0;
+    Effects.settings.particles = s.particles;
+    Effects.settings.numbers = s.numbers;
+    Effects.settings.shake = s.shake;
+    Renderer.shadowsOn = s.shadows;
+    Renderer.bloomOn = s.bloom;
+    const scale = s.quality === 'low' ? 0.6 : s.quality === 'medium' ? 0.8 : 1;
+    if (scale !== this.renderScale) { this.renderScale = scale; this.resize(); }
+  },
+
+  toast(title, text) { UI.toast(title, text); },
+
+  // --- Skärmar ---
+  showMenu() {
+    this.setState('menu');
+    Input.releaseLock();
+    Campaign.endless = false;
+    // Bakgrund: en lugn vy över slätterna.
+    if (!this.menuWorld) {
+      const saved = { r: Campaign.region, s: Campaign.stage };
+      Campaign.region = 0; Campaign.stage = 1;
+      this.menuWorld = true;
+      this.startStage(4242, true);
+      Enemies.reset();
+      Campaign.region = saved.r; Campaign.stage = saved.s;
+    }
+    const hasSave = Save.data.campaign.started;
+    UI.menu({
+      continue: () => this.beginCampaign(false),
+      newGame: () => {
+        if (hasSave && !window.confirm('Börja en ny kampanj? Dina färdigheter i lägret behålls, men Idealen och platsen i kampanjen börjar om.')) return;
+        Save.data.campaign = { region: 0, stage: 0, ideal: 1, started: true, finished: false };
+        Campaign.region = 0; Campaign.stage = 0; Progression.ideal = 1;
+        Save.save();
+        this.beginCampaign(true);
+      },
+      endless: () => { Campaign.endless = true; Campaign.endlessDepth = 0; Progression.ideal = Math.max(1, Save.data.campaign.ideal); this.menuWorld = false; this.startStage(undefined); this.play(); },
+      camp: () => this.openCamp(() => this.showMenu()),
+      codex: () => this.openCodex(() => this.showMenu()),
+      settings: () => this.openSettings(() => this.showMenu()),
+      about: () => { UI.about({ back: () => this.showMenu() }); this.subBack = () => this.showMenu(); },
+    }, hasSave);
+  },
+
+  beginCampaign(fromStart) {
+    Campaign.endless = false;
+    Save.data.campaign.started = true;
+    this.menuWorld = false;
+    this.startStage(undefined, true);
+    if (Campaign.stage === 0 || fromStart) this.showIntro();
+    else this.play();
+  },
+
+  showIntro() {
+    const cfg = this.stageCfg;
+    this.setState('intro');
+    Input.releaseLock();
+    if (cfg.regionIndex !== undefined) this.note('region' + cfg.regionIndex);
+    UI.regionIntro(cfg.region, cfg.name, { start: () => this.play() });
+  },
+
+  play() {
+    UI.hide();
+    this.setState('playing');
+    this.acc = 0;
+    Input.clearQueue();
+    Input.wantLock = true;
+    Input.requestLock();
+  },
+
+  pause() {
+    if (this.state !== 'playing') return;
+    this.setState('paused');
+    Input.releaseLock();
+    this.showPause();
+  },
+
+  showPause() {
+    this.subBack = null;
+    UI.pause({
+      resume: () => this.play(),
+      codex: () => this.openCodex(() => this.showPause()),
+      settings: () => this.openSettings(() => this.showPause()),
+      restart: () => { this.startStage(this.stageSeed, true); this.play(); },
+      quit: () => { this.saveProgress(); this.menuWorld = false; this.showMenu(); },
+    });
+  },
+
+  onPauseKey() {
+    if (this.state === 'playing') this.pause();
+    else if (this.subBack) { const b = this.subBack; this.subBack = null; b(); }
+    else if (this.state === 'paused') this.play();
+  },
+
+  openCamp(back) {
+    this.subBack = back;
+    const actions = {
+      buy: (id) => { if (Progression.buy(id)) { Sound.play('gemheart'); this.saveProgress(); if (Progression.wealth >= 0 && Save.data.totals.wealthTotal >= 500) Achievements.unlock('rich', this); UI.camp(actions); } },
+      back: () => { this.subBack = null; back(); },
+    };
+    UI.camp(actions);
+  },
+
+  openCodex(back, tab) {
+    this.subBack = back;
+    UI.codex(tab, { tab: (t) => this.openCodex(back, t), back: () => { this.subBack = null; back(); } });
+  },
+
+  openSettings(back) {
+    this.subBack = back;
+    UI.settings({
+      change: () => { this.applySettings(); Save.save(); },
+      back: () => { this.subBack = null; Save.save(); back(); },
+      resetSave: () => { if (window.confirm('Radera all sparad progression (kampanj, färdigheter, skissbok och statistik)?')) { Save.reset(); Progression.ideal = 1; Progression.wealth = 0; Progression.skills = Save.data.progress.skills; Campaign.region = 0; Campaign.stage = 0; this.toast('Sparfilen raderad', ''); } },
+    });
+  },
+
+  // Sparar kampanjens läge, färdigheter och statistik.
+  saveProgress() {
+    const c = Save.data.campaign;
+    if (!Campaign.endless) { c.region = Campaign.region; c.stage = Campaign.stage; c.ideal = Progression.ideal; }
+    Save.data.progress.wealth = Progression.wealth;
+    Save.data.progress.skills = Progression.skills;
+    Save.save();
+  },
+
+  note(id) {
+    const n = Save.data.codex.notes;
+    if (n[id] || !CODEX_NOTES[id] && !id.startsWith('region')) return;
+    const key = id.startsWith('region') ? ['plains', 'chasms', 'frost', 'origin'][Number(id.slice(6))] : id;
+    if (!key || n[key]) return;
+    n[key] = true;
+    Save.save();
+    this.toast('Ny sida i skissboken', CODEX_NOTES[key].title);
+  },
+
+  setState(s) {
+    if (s !== 'playing') TouchControls.reset();
+    this.state = s;
+    document.body.setAttribute('data-state', s);
+  },
+
+  resize() {
+    this.dpr = Math.min(window.devicePixelRatio || 1, 2);
+    this.w = window.innerWidth;
+    this.h = window.innerHeight;
+    Renderer.resize(this.w, this.h, this.dpr * this.renderScale);
+    this.hud.width = Math.floor(this.w * this.dpr);
+    this.hud.height = Math.floor(this.h * this.dpr);
+    Camera.aspect = this.w / this.h;
+  },
+
+  makeEnv(theme) {
+    const s = theme.sky;
+    const sd = V3.normalize(V3.create(), theme.sunDir);
+    return {
+      sunDir: sd,
+      sunCol: Float32Array.from(s.sun),
+      skyTop: Float32Array.from(s.top), skyHorizon: Float32Array.from(s.horizon), skyGround: Float32Array.from(s.ground),
+      cloudCol: Float32Array.from(s.cloud),
+      ambientSky: Float32Array.from(theme.ambientSky), ambientGround: Float32Array.from(theme.ambientGround),
+      fog: theme.fog, storm: 0, chasmFloor: CHASM_FLOOR,
+      retract: new Float32Array([0, 0, 0, 6]), retractAll: 0,
+      bloom: 0.9, exposure: 1.0, grade: Float32Array.from([1.03, 1.0, 0.95]), vignette: 0.9,
+      overlay: new Float32Array(4), shadowRange: 60,
+      base: theme,
+    };
+  },
+
+  startStage(seed, noPlay) {
+    const cfg = this.stageCfg = Campaign.config();
+    const level = this.level = cfg.level;
+    this.stageBoss = cfg.boss;
+    this.bossSpawned = false;
+    this.complete = false;
+    this.completeTimer = 0;
+    this.tutorialIdx = 0;
+    this.guardians = false;
+    this.goalGem = false;
+    this.seenTypes = this.seenTypes || {};
+    seed = seed === undefined ? (Math.random() * 1e9) | 0 : seed;
+    this.stageSeed = seed;
+    this.deathTimer = 0;
+    this.showResults = 0;
+    World.generate({ level, length: cfg.length, theme: cfg.theme, tutorial: cfg.tutorial }, seed);
+    this.env = this.makeEnv(cfg.theme);
+    if (Sound.ctx) Music.setKey(cfg.music[0], cfg.music[1]);
+    this.time = 0;
+    this.tick = 0;
+    Effects.reset();
+    Enemies.reset();
+    Blade.reset();
+    Abilities.reset();
+    Bosses.reset();
+    this.stats = { kills: 0, damage: 0, taken: 0, wealth: 0, gemhearts: 0, stormTime: 0 };
+    this.mods = { hp: 1 + (level - 1) * 0.28, dmg: 1 + (level - 1) * 0.16, speed: 1 + Math.min(0.25, (level - 1) * 0.05) };
+    for (const s of World.spawns) Enemies.spawn(s.type, s.x, s.y, s.z, this.mods, s.elite, s.home);
+    Pickups.reset();
+    for (const s of World.sphereSpots) Pickups.spawnSphere(s.x, s.y, s.z, Math.random() < 0.12 ? 2 : Math.random() < 0.4 ? 1 : 0, !s.dun, false);
+    for (const h of World.herbSpots) Pickups.spawnItem('knobweed', h.x, h.y, h.z, false);
+    const sc = cfg.theme.storm || [70, 125];
+    Storm.reset(rand(sc[0], sc[0] + 25), sc[1]);
+    this.banner = null;
+    const p = this.player;
+    p.reset();
+    const st = World.start;
+    p.spawnAt(st.cx, st.y1 + 0.05, st.cz);
+    this.stageStart = this.time;
+    Progression.apply(p);
+    p.light = p.stats.maxLight;
+    Spren.reset(p);
+    this.showBanner(cfg.region.name, cfg.name, '#f3e6c8', 4);
+    if (!cfg.endless && cfg.stageIndex === 0 && !cfg.tutorial) Spren.say(cfg.region.intro[cfg.region.intro.length - 1], 7);
+    // Titta österut (mot målet).
+    V3.set(p.facing, 1, 0, 0);
+    Camera.reset(V3.create(0, 1, 0), V3.create(1, 0, 0));
+    Input.clearQueue();
+    this.mapOpen = false;
+    this.mapImg = null;
+    if (!noPlay) this.setState('playing');
+    if (!Campaign.endless && !this.menuWorld) this.saveProgress();
+  },
+
+  // Kartan ritas som en skissbokssida en gång per etapp (pergament + bläck).
+  buildMap() {
+    const b = World.bounds;
+    const cv = document.createElement('canvas');
+    cv.width = 1400;
+    cv.height = Math.max(200, Math.round(1400 * (b.z1 - b.z0) / (b.x1 - b.x0)));
+    const g = cv.getContext('2d');
+    g.fillStyle = '#e8dcc0';
+    g.fillRect(0, 0, cv.width, cv.height);
+    UI.drawMap(cv);
+    // drawMap rensar duken; lägg pergamentet bakom bläcket.
+    g.globalCompositeOperation = 'destination-over';
+    const grad = g.createRadialGradient(cv.width / 2, cv.height / 2, 10, cv.width / 2, cv.height / 2, cv.width * 0.6);
+    grad.addColorStop(0, '#efe4c8'); grad.addColorStop(1, '#d6c49c');
+    g.fillStyle = grad;
+    g.fillRect(0, 0, cv.width, cv.height);
+    g.globalCompositeOperation = 'source-over';
+    this.mapImg = cv;
+    return cv;
+  },
+
+  // Markörer på kartan: spelaren (pil i blickriktningen), målet, bossen och stormen.
+  drawMapMarks(ctx, P, s, ox, oy, k) {
+    const p = this.player;
+    if (Storm.state !== 'calm') {
+      const b = World.bounds;
+      const a = P(Storm.wallX, b.z0), z = P(Storm.wallX, b.z1);
+      ctx.strokeStyle = Storm.dir > 0 ? 'rgba(60,110,190,0.8)' : 'rgba(190,50,40,0.8)';
+      ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(ox + a[0] * k, oy + a[1] * k); ctx.lineTo(ox + z[0] * k, oy + z[1] * k); ctx.stroke();
+    }
+    const boss = Bosses.boss;
+    if (boss && !boss.dead) {
+      const q = P(boss.pos[0], boss.pos[2]);
+      ctx.fillStyle = '#9a2a1a';
+      ctx.beginPath(); ctx.arc(ox + q[0] * k, oy + q[1] * k, 6, 0, TAU); ctx.fill();
+    }
+    const q = P(p.pos[0], p.pos[2]);
+    const x = ox + q[0] * k, y = oy + q[1] * k;
+    const f = Camera.fwd, fl = Math.hypot(f[0], f[2]) || 1;
+    const fx = f[0] / fl, fz = f[2] / fl;
+    ctx.fillStyle = '#2a5a9a';
+    ctx.strokeStyle = '#f3ecd8';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(x + fx * 10, y + fz * 10);
+    ctx.lineTo(x - fx * 6 - fz * 6, y - fz * 6 + fx * 6);
+    ctx.lineTo(x - fx * 6 + fz * 6, y - fz * 6 - fx * 6);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+  },
+
+  drawMinimap(ctx, w) {
+    const img = this.mapImg || this.buildMap();
+    const P = img.mapP, s = img.mapS, p = this.player;
+    const R = 70, cx = w - R - 18, cy = R + 18;
+    const q = P(p.pos[0], p.pos[2]);
+    const k = 1.1 / s;   // ungefär 1,1 px per meter
+    ctx.save();
+    ctx.beginPath(); ctx.arc(cx, cy, R, 0, TAU); ctx.clip();
+    ctx.globalAlpha = 0.9;
+    ctx.drawImage(img, cx - q[0] * k, cy - q[1] * k, img.width * k, img.height * k);
+    ctx.globalAlpha = 1;
+    this.drawMapMarks(ctx, P, s, cx - q[0] * k, cy - q[1] * k, k);
+    ctx.restore();
+    ctx.strokeStyle = 'rgba(43,29,18,0.9)';
+    ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(cx, cy, R, 0, TAU); ctx.stroke();
+    ctx.fillStyle = '#f3e6c8';
+    ctx.font = 'italic 12px Georgia';
+    ctx.textAlign = 'center';
+    ctx.fillText('Ö →', cx + R - 14, cy + R + 14);
+    ctx.textAlign = 'left';
+  },
+
+  drawBigMap(ctx, w, h) {
+    const img = this.mapImg || this.buildMap();
+    const k = Math.min((w - 60) / img.width, (h - 120) / img.height);
+    const dw = img.width * k, dh = img.height * k, ox = (w - dw) / 2, oy = (h - dh) / 2;
+    ctx.fillStyle = 'rgba(10,14,22,0.55)';
+    ctx.fillRect(0, 0, w, h);
+    ctx.shadowColor = 'rgba(0,0,0,0.5)'; ctx.shadowBlur = 20;
+    ctx.drawImage(img, ox, oy, dw, dh);
+    ctx.shadowBlur = 0;
+    this.drawMapMarks(ctx, img.mapP, img.mapS, ox, oy, k);
+    ctx.fillStyle = '#f3e6c8';
+    ctx.font = 'italic 15px Georgia';
+    ctx.textAlign = 'center';
+    ctx.fillText(this.stageCfg.region.name + ' – ' + this.stageCfg.name + '   ·   ' + (this.touch ? 'tryck Karta' : Pad.active ? 'tryck Back' : 'tryck Tab') + ' för att stänga', w / 2, oy - 14);
+    ctx.textAlign = 'left';
+  },
+
+  loop(t) {
+    let frame = (t - this.last) / 1000;
+    this.last = t;
+    if (frame > 0.25) frame = 0.25;
+    if (frame < 0) frame = 0;
+    this.realTime += frame;
+    if (frame > 0.002) this.fps += (1 / frame - this.fps) * 0.05;
+    this.frameDt = frame;
+    Pad.update(frame);
+    TouchControls.update(frame);
+    if (this.state === 'playing') {
+      this.acc += frame;
+      let steps = 0;
+      while (this.acc >= STEP && steps < 6 && this.state === 'playing') {
+        this.update(STEP);
+        this.acc -= STEP;
+        steps++;
+      }
+      if (steps === 6) this.acc = 0;
+      const look = Input.takeLook(frame);
+      Camera.look(look.dx, look.dy);
+      Camera.update(frame, this.player.pos, V3.scale(this._c, this.player.g, -1), null);
+      Save.data.totals.time += frame;
+    } else if (this.state === 'menu' || this.state === 'intro') {
+      // Kameran svävar långsamt över banan.
+      const t = this.realTime * 0.04;
+      const st = World.start;
+      V3.set(Camera.pos, st.cx + 60 + Math.cos(t) * 90, 40 + Math.sin(t * 0.7) * 8, st.cz + Math.sin(t) * 90);
+      V3.set(Camera.fwd, -Math.cos(t), -0.28, -Math.sin(t));
+      V3.normalize(Camera.fwd, Camera.fwd);
+      V3.cross(Camera.right, Camera.fwd, [0, 1, 0]); V3.normalize(Camera.right, Camera.right);
+      V3.cross(Camera.up, Camera.right, Camera.fwd);
+      Camera.updateMatrices();
+      Effects.update(frame);
+    } else if (this.state !== 'loading') {
+      Camera.update(0, this.player.pos, V3.scale(this._c, this.player.g, -1), null);
+    }
+    this.render();
+    requestAnimationFrame((tt) => this.loop(tt));
+  },
+
+  update(dt) {
+    this.time += dt;
+    this.tick++;
+    this.player.update(dt, this);
+    Blade.update(dt, this);
+    Abilities.update(dt, this);
+    Enemies.update(dt, this);
+    Bosses.update(dt, this);
+    Spren.update(dt, this);
+    this.updateStage(dt);
+    this.updateAudio(dt);
+    Projectiles.update(dt, this);
+    Pickups.update(dt, this);
+    Storm.update(dt, this);
+    Storm.affectPlayer(this.player, dt, this);
+    Effects.update(dt);
+    if (this.banner && (this.banner.t -= dt) <= 0) this.banner = null;
+  },
+
+  // Etappens mål: nå arenan, besegra bossen och ta dess gemheart.
+  updateStage(dt) {
+    const p = this.player;
+    const ar = World.arena;
+    if (!this.bossSpawned && p.alive && Math.hypot(p.pos[0] - ar.cx, p.pos[2] - ar.cz) < ar.radius * 0.85 && p.pos[1] > ar.y1 - 2) {
+      this.bossSpawned = true;
+      if (this.stageBoss) { Bosses.spawn(this.stageBoss, this); Spren.say(LIRRA.boss[this.stageBoss], 6); }
+      else this.reachedGoal();
+    }
+    if (this.completeTimer > 0) {
+      this.completeTimer -= dt;
+      if (this.completeTimer <= 0) this.showComplete();
+    }
+    if (this.deathTimer > 0) {
+      this.deathTimer -= dt;
+      if (this.deathTimer <= 0) this.showGameOver();
+    }
+    // Lirras handledning i första etappen.
+    if (this.stageCfg.tutorial && this.tutorialIdx < LIRRA.tutorial.length && this.time - this.stageStart >= LIRRA.tutorial[this.tutorialIdx][0]) {
+      const line = LIRRA.tutorial[this.tutorialIdx];
+      Spren.say(line[Pad.active ? 3 : this.touch ? 2 : 1] || line[1], 8);
+      this.tutorialIdx++;
+    }
+    if (p.alive && p.hp < p.stats.maxHp * 0.25 && !this._lowSaid) { this._lowSaid = true; Spren.say(pick(LIRRA.lowHp), 3); }
+    if (p.hp > p.stats.maxHp * 0.5) this._lowSaid = false;
+    this.updateWeather(dt);
+  },
+
+  // Etapper utan boss: målet nås på arenan, där väktare och en gemheart väntar.
+  reachedGoal() {
+    const ar = World.arena;
+    const n = 3 + Math.floor(this.level);
+    const types = ['warrior', 'archer', 'shield', 'thunder', 'hover'];
+    for (let k = 0; k < n; k++) {
+      const a = (k / n) * TAU;
+      const t = types[k % Math.min(types.length, 2 + Math.floor(this.level))];
+      const e = Enemies.spawn(t, ar.cx + Math.cos(a) * 18, ar.y1 + (t === 'hover' ? 6 : 0.2), ar.cz + Math.sin(a) * 18, this.mods, k === 0, ar);
+      e.alert = true;
+      e.guardian = true;
+    }
+    this.guardians = true;
+    this.showBanner('Väktarna', 'Besegra dem för att ta platåns gemheart', '#f0c070', 3.5);
+  },
+
+  nextStage() {
+    const newRegion = Campaign.advance();
+    if (Campaign.endless) {
+      Save.data.best.endless = Math.max(Save.data.best.endless, Campaign.endlessDepth + 1);
+      if (Campaign.endlessDepth >= 4) Achievements.unlock('endless5', this);
+    }
+    if (Campaign.finished) {
+      Save.data.campaign.finished = true;
+      Campaign.finished = false; Campaign.region = 0; Campaign.stage = 0;
+      this.saveProgress();
+      this.toast('Kampanjen klar!', 'Everstormens härold är besegrad. Tack för att du spelade!');
+      this.menuWorld = false;
+      this.showMenu();
+      return;
+    }
+    this.startStage(undefined, true);
+    if (newRegion || Campaign.stage === 0) this.showIntro(); else this.play();
+  },
+
+  showComplete(again) {
+    this.setState('complete');
+    Input.releaseLock();
+    if (!again) { Save.data.totals.stages++; this.saveProgress(); }
+    UI.complete(this.stageCfg, this.stats, this.time, this.lastIdeal, {
+      next: () => this.nextStage(),
+      camp: () => this.openCamp(() => this.showComplete(true)),
+      menu: () => { Campaign.advance(); this.saveProgress(); this.menuWorld = false; this.showMenu(); },
+    });
+  },
+
+  showGameOver(again) {
+    this.setState('gameover');
+    Input.releaseLock();
+    if (!again) {
+      Save.data.totals.deaths++;
+      // Hälften av sfärerna från etappen följer med till lägret.
+      Progression.wealth += Math.floor(this.stats.wealth / 2);
+      this.saveProgress();
+    }
+    UI.gameOver(this.stageCfg, this.stats, this.time, {
+      retry: () => { this.startStage(this.stageSeed, true); this.play(); },
+      camp: () => this.openCamp(() => this.showGameOver(true)),
+      menu: () => { this.menuWorld = false; this.showMenu(); },
+    });
+  },
+
+  // Väder: damm, sporer, snö eller aska runt kameran.
+  updateWeather(dt) {
+    const w = this.stageCfg.theme.weather;
+    const c = Camera.pos;
+    const n = Math.random() < dt * 30 * Effects.settings.particles ? 1 : 0;
+    for (let i = 0; i < n; i++) {
+      const a = rand(0, TAU), r = rand(5, 22);
+      const x = c[0] + Math.cos(a) * r, y = c[1] + rand(-4, 12), z = c[2] + Math.sin(a) * r;
+      if (w === 'snow') Effects.particle(x, y, z, rand(-0.5, 0.5), -rand(1, 2), rand(-0.5, 0.5), 6, rand(0.04, 0.08), [1, 1, 1], 0.9, 0.2, 0, false);
+      else if (w === 'spores') Effects.particle(x, y - 6, z, rand(-0.2, 0.2), rand(0.1, 0.4), rand(-0.2, 0.2), 5, 0.05, [0.6, 1, 0.5], 0.8, 0.3, -0.02, true);
+      else if (w === 'ash') Effects.particle(x, y, z, rand(-1, 1), -rand(0.3, 0.8), rand(-1, 1), 6, rand(0.04, 0.08), Math.random() < 0.15 ? [1, 0.45, 0.2] : [0.25, 0.24, 0.27], 0.8, 0.2, 0, Math.random() < 0.15);
+      else Effects.particle(x, y, z, rand(-0.3, 0.3), rand(-0.1, 0.1), rand(-0.3, 0.3), 5, 0.03, [1, 0.9, 0.7], 0.5, 0.2, 0, true);
+    }
+    // Väktarna besegrade: gemhearten dyker upp.
+    if (this.guardians && !this.complete) {
+      let left = 0;
+      for (const e of Enemies.list) if (!e.dead && e.guardian) left++;
+      if (left === 0) {
+        this.guardians = false;
+        const ar = World.arena;
+        let gx = ar.cx, gz = ar.cz;
+        for (let k = 0; k < 30 && World.insideAny(gx, ar.y1 + 0.6, gz); k++) { gx += rand(-3, 3); gz += rand(-3, 3); }
+        Pickups.spawnItem('gemheart', gx, ar.y1, gz, false);
+        this.showBanner('Platån är fri', 'Ta gemhearten', '#f0d890', 3);
+        this.goalGem = true;
+      }
+    }
+  },
+
+  // Ljudslingor och musikläge efter vad som händer.
+  updateAudio() {
+    if (!Sound.ready()) return;
+    const p = this.player;
+    const k = Storm.intensity;
+    Sound.setLoop('wind', k * 0.5 + Math.min(0.25, V3.len(p.vel) / 150), 300 + k * 500);
+    Sound.setLoop('rain', k > 0.3 ? (k - 0.3) * 0.35 : 0);
+    Sound.setLoop('flight', !p.grounded && p.lashed ? Math.min(0.3, V3.len(p.vel) / 120) : 0, 500 + V3.len(p.vel) * 20);
+    let hum = 0, combat = false;
+    for (const e of Enemies.list) {
+      if (e.dead) continue;
+      const d = V3.dist(e.pos, p.pos);
+      if ((e.type === 'warrior' || e.type === 'archer' || e.type === 'shield') && d < 25) hum += (1 - d / 25) * 0.05;
+      if (e.alert && d < 35) combat = true;
+    }
+    Sound.setLoop('hum', Math.min(0.12, hum));
+    Music.setMode(Bosses.boss && !Bosses.boss.dead ? 'boss' : combat ? 'combat' : Storm.contains(p.pos[0]) ? 'storm' : 'explore');
+    Music.update();
+    // Fotsteg.
+    if (p.grounded && Math.hypot(p.vel[0], p.vel[2]) > 2) {
+      const ph = Math.floor(((p.phase || 0) + Math.PI / 2) / Math.PI);
+      if (ph !== this._stepPh) { this._stepPh = ph; Sound.play('step', 0.8); Effects.dust(p.pos[0], p.pos[1], p.pos[2], 1, 0.3); }
+    }
+  },
+
+  // Ljud i världen dämpas med avståndet.
+  sfx(name, pos) {
+    if (!pos) { Sound.play(name); return; }
+    const d = V3.dist(pos, this.player.pos);
+    if (d < 70) Sound.play(name, Math.max(0.15, 1 - d / 70));
+  },
+
+  showBanner(text, sub, color, time) {
+    this.banner = { text, sub: sub || '', color: color || '#f3e6c8', t: time || 3.5, max: time || 3.5 };
+  },
+
+  // Vrider en riktning mot närmaste fiende inom räckvidd och vinkel.
+  aimAssist(dir, range, cosLimit) {
+    // Pekskärm och handkontroll siktar grövre, så hjälpen blir generösare.
+    if (this.touch || Pad.active) { range *= 1.3; cosLimit = Math.min(cosLimit, cosLimit * 0.6 + 0.1); }
+    const pc = this.player.center(this._c);
+    let best = null, bestScore = -1e9;
+    const ec = this._ec || (this._ec = V3.create());
+    for (const e of Enemies.list) {
+      if (e.dead || e.invulnerable) continue;
+      if (e.boss) { const z = Bosses.zones(e)[0]; V3.set(ec, z[0], z[1], z[2]); } else Enemies.center(e, ec);
+      const dx = ec[0] - pc[0], dy = ec[1] - pc[1], dz = ec[2] - pc[2], d = Math.hypot(dx, dy, dz);
+      if (d > range + e.r || d < 0.01) continue;
+      const c = (dx * dir[0] + dy * dir[1] + dz * dir[2]) / d;
+      if (c < cosLimit) continue;
+      const score = c * 2 - d / range;
+      if (score > bestScore) { bestScore = score; best = V3.set(this._aa || (this._aa = V3.create()), dx / d, dy / d, dz / d); }
+    }
+    return best || dir;
+  },
+
+  // All skada på fiender går hit. dir = knuffriktning, knock = styrka.
+  damageEnemy(e, dmg, dir, knock, source) {
+    if (e.dead) return 0;
+    const p = this.player;
+    if ((source === 'blade' || source === 'spear') && Enemies.blocks(e, p.center(this._c))) {
+      this.onBlocked(e);
+      const pc = p.center(this._c);
+      V3.addScaled(p.vel, p.vel, V3.normalize(this._c, V3.sub(this._c, pc, e.pos)), 8);
+      return 0;
+    }
+    e.hp -= dmg;
+    e.lastHitSource = source;
+    e.flash = 0.08;
+    e.alert = true;
+    if (dir && knock) {
+      const w = e.def.weight * (e.boss ? 25 : 1);
+      V3.addScaled(e.vel, e.vel, dir, knock / w);
+      if (!e.def.flying) e.vel[1] += 3 / w;
+    }
+    if (e.type === 'leech') { e.state = 1; e.timer = 1.3; }
+    this.stats.damage += dmg;
+    this.onEnemyHit(e, dmg, source);
+    if (e.hp <= 0) this.killEnemy(e);
+    return dmg;
+  },
+
+  killEnemy(e) {
+    e.dead = true;
+    this.stats.kills++;
+    Save.data.totals.kills++;
+    if (e.lastHitSource === 'fall') Achievements.unlock('fallKill', this);
+    if (e.boss) { Save.data.totals.bosses++; Achievements.unlock(e.bossType, this); }
+    if (e.boss) { this.onBossKilled(e); return; }
+    this.onEnemyKilled(e);
+  },
+
+  // Riktning från spelaren mot det man siktar på (kamerans mittpunkt).
+  aimDirection(p) {
+    if (this._aimTick === this.tick) return this._aim;
+    this._aimTick = this.tick;
+    const c = Camera.pos, f = Camera.fwd;
+    const d = World.raycast(c[0], c[1], c[2], f[0], f[1], f[2], 220, 1);
+    const tx = c[0] + f[0] * d, ty = c[1] + f[1] * d, tz = c[2] + f[2] * d;
+    const pc = p.center(this._c);
+    V3.set(this._aim, tx - pc[0], ty - pc[1], tz - pc[2]);
+    if (V3.len(this._aim) < 2) V3.copy(this._aim, f);
+    V3.normalize(this._aim, this._aim);
+    return this._aim;
+  },
+
+  wind(pos) { return Storm.wind(pos); },
+
+  render() {
+    const p = this.player;
+    const env = this.env;
+    env.retract[0] = p.pos[0]; env.retract[1] = p.pos[1]; env.retract[2] = p.pos[2];
+    Storm.applyEnv(env, env.base);
+    env.bloom = Renderer.bloomOn === false ? 0 : 0.9;
+    // Röd blixt vid skada och puls när livet är lågt.
+    if (this.hurtFlash > 0) this.hurtFlash -= this.frameDt || 0.016;
+    const low = p.alive && p.hp < p.stats.maxHp * 0.25 ? 0.12 + 0.08 * Math.sin(this.realTime * 6) : 0;
+    const red = Math.max(Math.max(0, this.hurtFlash || 0) * 0.45, low);
+    if (red > env.overlay[3]) { env.overlay[0] = 0.75; env.overlay[1] = 0.08; env.overlay[2] = 0.05; env.overlay[3] = red; }
+    Renderer.begin(Camera, env, this.realTime);
+    World.draw(Camera);
+    Pickups.draw(this);
+    Storm.draw(this);
+    Bosses.draw(this);
+    Abilities.draw(this);
+    Spren.draw(this);
+    Enemies.draw(this);
+    Projectiles.draw(this);
+    if (this.state !== 'menu' && this.state !== 'intro') p.draw(this);
+    Blade.draw();
+    Effects.draw();
+    // Stormlight lyser upp omgivningen.
+    if (p.light > 1) {
+      const c = p.center(this._c);
+      const k = p.light / p.stats.maxLight;
+      Renderer.light(c[0], c[1], c[2], 0.06 + 0.1 * k, 0.09 + 0.14 * k, 0.14 + 0.2 * k, 3 + k * 3);
+    }
+    Renderer.render(p.pos);
+    this.drawHud();
+  },
+
+  drawHud() {
+    const ctx = this.hctx, w = this.w, h = this.h, p = this.player;
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+    if (this.state !== 'playing' && this.state !== 'paused') return;
+    document.getElementById('lockhint').classList.toggle('show', !Input.locked && !this.touch && !Pad.active && this.state === 'playing');
+    // Sikte.
+    ctx.strokeStyle = 'rgba(235,245,255,0.8)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(w / 2, h / 2, 5, 0, TAU);
+    ctx.moveTo(w / 2 - 12, h / 2); ctx.lineTo(w / 2 - 8, h / 2);
+    ctx.moveTo(w / 2 + 8, h / 2); ctx.lineTo(w / 2 + 12, h / 2);
+    ctx.stroke();
+    // Liv och Stormlight.
+    ctx.fillStyle = 'rgba(20,16,12,0.5)';
+    ctx.fillRect(16, 16, 230, 34);
+    ctx.fillStyle = '#d0533a';
+    ctx.fillRect(20, 20, 222 * p.hp / p.stats.maxHp, 10);
+    ctx.fillStyle = '#e4f4ff';
+    ctx.fillRect(20, 35, 222 * p.light / p.stats.maxLight, 10);
+    // Gravitationskompass: pil som visar Lashingens riktning relativt kameran.
+    const gx = V3.dot(p.g, Camera.right), gy = -V3.dot(p.g, Camera.up), gz = V3.dot(p.g, Camera.fwd);
+    const cx = this.touch ? 56 : w - 60, cy = this.touch ? 150 : h - 60;
+    ctx.fillStyle = 'rgba(20,16,12,0.45)';
+    ctx.beginPath(); ctx.arc(cx, cy, 34, 0, TAU); ctx.fill();
+    ctx.strokeStyle = p.lashed ? '#bfe6ff' : 'rgba(240,230,210,0.7)';
+    ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + gx * 26, cy + gy * 26); ctx.stroke();
+    ctx.fillStyle = ctx.strokeStyle;
+    ctx.beginPath(); ctx.arc(cx + gx * 26, cy + gy * 26, 4 + gz * 2, 0, TAU); ctx.fill();
+    for (let i = 0; i < p.strength; i++) { ctx.beginPath(); ctx.arc(cx - 12 + i * 12, cy + 44, 3, 0, TAU); ctx.fill(); }
+    ctx.fillStyle = '#fff';
+    ctx.font = '12px Georgia';
+    ctx.textAlign = 'left';
+    if (Save.data.settings.showFps) ctx.fillText(Math.round(this.fps) + ' fps', 16, h - 16);
+    // Livmätare över skadade fiender.
+    const o = this._p2;
+    for (const e of Enemies.list) {
+      if (e.dead || e.boss || e.hp >= e.maxHp) continue;
+      if (!Camera.project(e.pos[0], e.pos[1] + e.h + 0.4, e.pos[2], w, h, o)) continue;
+      const d = V3.dist(Camera.pos, e.pos);
+      if (d > 45) continue;
+      const bw = clamp(60 - d, 24, 56);
+      ctx.fillStyle = 'rgba(25,18,12,0.65)';
+      ctx.fillRect(o[0] - bw / 2, o[1], bw, 5);
+      ctx.fillStyle = e.elite ? '#e0b040' : '#d0533a';
+      ctx.fillRect(o[0] - bw / 2, o[1], bw * Math.max(0, e.hp / e.maxHp), 5);
+    }
+    Effects.drawFloats(ctx, w, h);
+    // Bossens livmätare.
+    const boss = Bosses.boss;
+    if (boss && !boss.dead) {
+      const bw = Math.min(560, w * (this.touch ? 0.42 : 0.6)), bx = (w - bw) / 2, by = this.touch ? 40 : h - 70;
+      ctx.fillStyle = 'rgba(20,14,10,0.65)';
+      ctx.fillRect(bx - 4, by - 4, bw + 8, 20);
+      ctx.fillStyle = boss.invulnerable ? '#7a6a6a' : '#c8402a';
+      ctx.fillRect(bx, by, bw * Math.max(0, boss.hp / boss.maxHp), 12);
+      ctx.strokeStyle = 'rgba(232,210,160,0.7)';
+      ctx.strokeRect(bx - 4.5, by - 4.5, bw + 9, 21);
+      for (const f of [0.33, 0.66]) { ctx.fillStyle = 'rgba(232,210,160,0.6)'; ctx.fillRect(bx + bw * f, by, 2, 12); }
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#f1e4c4';
+      ctx.font = 'bold 15px Georgia';
+      ctx.fillText(BOSS_DEFS[boss.bossType].name.toUpperCase(), w / 2, by - 12);
+    }
+    // Förmågor och nedkylning.
+    const abil = [['R', 'full', 'Full Lashing'], ['F', 'lashEnemy', 'Lasha fiende'], ['G', 'spear', 'Spjut'], ['C', 'wind', 'Vindkallelse']];
+    let ax = w - 290;
+    for (const a of (this.touch ? [] : abil)) {
+      const on = Progression.has(a[1]);
+      ctx.fillStyle = on ? 'rgba(20,16,12,0.55)' : 'rgba(20,16,12,0.25)';
+      ctx.fillRect(ax, h - 40, 52, 26);
+      if (on && Abilities.cd[a[1]] > 0) { ctx.fillStyle = 'rgba(140,190,255,0.35)'; ctx.fillRect(ax, h - 40, 52 * (Abilities.cd[a[1]] / Abilities.cooldown[a[1]]), 26); }
+      ctx.fillStyle = on ? '#e8f4ff' : 'rgba(232,220,200,0.35)';
+      ctx.font = 'bold 13px Georgia';
+      ctx.textAlign = 'center';
+      ctx.fillText(a[0], ax + 26, h - 22);
+      ax += 58;
+    }
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#d4af4a';
+    ctx.font = 'italic 13px Georgia';
+    ctx.fillText(IDEALS[Progression.ideal - 1].title + ' · ' + this.stageCfg.region.name + ' – ' + this.stageCfg.name, 20, this.touch ? 70 : 92);
+    // Lirras repliker.
+    if (Spren.lirra.speech) {
+      ctx.globalAlpha = Math.min(1, Spren.lirra.speechT * 2);
+      ctx.font = 'italic ' + (w < 900 ? 13 : 16) + 'px Georgia';
+      ctx.textAlign = 'center';
+      // Radbryt långa repliker så att de får plats på smala skärmar.
+      const maxW = Math.min(w - 60, 760), fs = w < 900 ? 13 : 16, lh = fs + 6;
+      const lines = [];
+      let cur = 'Lirra:';
+      for (const word of Spren.lirra.speech.split(' ')) {
+        if (ctx.measureText(cur + ' ' + word).width > maxW) { lines.push(cur); cur = word; } else cur += ' ' + word;
+      }
+      lines.push(cur);
+      let tw = 0;
+      for (const l of lines) tw = Math.max(tw, ctx.measureText(l).width);
+      tw += 40;
+      const boxH = lines.length * lh + 14;
+      const ly = this.touch ? 102 : h - 98 - boxH;
+      ctx.fillStyle = 'rgba(16,22,34,0.6)';
+      ctx.fillRect(w / 2 - tw / 2, ly, tw, boxH);
+      ctx.fillStyle = '#d8ecff';
+      lines.forEach((l, i) => ctx.fillText(l, w / 2, ly + 7 + fs + i * lh));
+      ctx.globalAlpha = 1;
+      ctx.textAlign = 'left';
+    }
+
+    // Stormvarning och lä.
+    ctx.textAlign = 'left';
+    ctx.font = 'italic 14px Georgia';
+    if (Storm.state === 'warning') {
+      ctx.fillStyle = '#dbe7ff';
+      ctx.fillText('Highstormen om ' + Math.ceil(Storm.timer) + ' s', 20, this.touch ? 88 : 72);
+    } else if (Storm.state === 'active') {
+      ctx.fillStyle = p.inShelter ? '#bfe6ff' : '#ffb0a0';
+      ctx.fillText(Storm.contains(p.pos[0]) ? (p.inShelter ? 'I lä – Stormlight fyller dig' : 'Utsatt för stormen!') : 'Highstormen drar fram', 20, this.touch ? 88 : 72);
+    }
+    const b = this.state === 'playing' ? this.banner : null;
+    if (b) {
+      ctx.globalAlpha = Math.min(1, (b.max - b.t) * 3, b.t * 1.5);
+      ctx.textAlign = 'center';
+      ctx.fillStyle = b.color;
+      ctx.shadowColor = 'rgba(0,0,0,0.6)';
+      ctx.shadowBlur = 8;
+      ctx.font = 'bold ' + Math.round(Math.min(42, w / 14)) + 'px Georgia';
+      const by = h * (this.touch ? 0.47 : 0.26);
+      ctx.fillText(b.text, w / 2, by);
+      ctx.font = 'italic 17px Georgia';
+      ctx.fillText(b.sub, w / 2, by + 34);
+      ctx.shadowBlur = 0;
+      ctx.globalAlpha = 1;
+    }
+    if (!this.touch && !this.mapOpen && Save.data.settings.minimap !== false) this.drawMinimap(ctx, w);
+    if (this.mapOpen && this.state === 'playing') this.drawBigMap(ctx, w, h);
+  },
+
+  // --- Händelser (fylls på i senare steg) ---
+  onLash(p, more) {
+    Achievements.unlock('firstLash', this);
+    if (p.strength >= 3) Achievements.unlock('tripleLash', this);
+    Sound.play(more ? 'lashMore' : 'lash');
+    const c = p.center(this._c);
+    Effects.burst(c[0], c[1], c[2], [0.85, 0.95, 1], 18, 5, 0.5, 0.1);
+  },
+  onLashFail() { Sound.play('fail'); Spren.say('Du har för lite Stormlight. Andas in från sfärerna!', 3); },
+  onLashReset() { Sound.play('lashReset'); },
+  onLightOut() { Sound.play('fail'); Spren.say('Ditt Stormlight tog slut – du faller!', 3); },
+  onDash(p) {
+    Sound.play('dash');
+    const c = p.center(this._c);
+    Effects.burst(c[0], c[1], c[2], [0.85, 0.95, 1], 24, 6, 0.4, 0.1);
+  },
+  onJump() { Sound.play('jump'); },
+  onSlam(p, speed) {
+    if (speed > 45) Achievements.unlock('slam', this);
+    p.landT = Math.min(1, speed / 40);
+    Sound.play(speed > 40 ? 'slam' : 'land');
+    Effects.dust(p.pos[0], p.pos[1], p.pos[2], 16, 2.5);
+    Effects.shake(Math.min(0.7, speed / 60));
+    // Nedslaget skadar och knuffar fiender runt omkring.
+    const pc = p.pos;
+    for (const e of Enemies.list) {
+      if (e.dead) continue;
+      const d = V3.dist(e.pos, pc);
+      if (d < 4.5) {
+        const dir = V3.normalize(V3.create(), V3.sub(V3.create(), e.pos, pc));
+        dir[1] = 0.5;
+        this.damageEnemy(e, speed * 0.9 * (1 - d / 6), dir, 10, 'slam');
+      }
+    }
+  },
+  onPlayerHurt(p, dmg) {
+    Pad.rumble(Math.min(1, 0.3 + dmg / 40), 160);
+    const c = p.center(this._c);
+    Effects.burst(c[0], c[1], c[2], [1, 0.45, 0.3], 10, 4, 0.5, 0.08, { add: false, grav: 6 });
+    Effects.shake(0.3);
+    this.stats.taken += Math.min(dmg, p.stats.maxHp);
+    Sound.play('hurt');
+    Spren.painspren(p.pos[0], p.pos[1], p.pos[2]);
+    this.hurtFlash = 0.5;
+  },
+  onPlayerDeath(p) {
+    this.deathTimer = 2.2;
+    const c = p.center(this._c);
+    Effects.burst(c[0], c[1], c[2], [0.85, 0.95, 1], 80, 8, 1.6, 0.12);
+    Sound.play('crumble');
+    Spren.say('Nej… res dig!', 2);
+  },
+  onSwing(sw) { Sound.play(sw.combo === 2 ? 'swingHeavy' : 'swing'); },
+  onCarveHit(pr, x, y, z) { Effects.debris(x, y, z, [0.62, 0.5, 0.4], 6, 4); Effects.shake(0.05); },
+  onCarve(pr) {
+    Save.data.totals.carved++;
+    Achievements.unlock('carve', this);
+    Sound.play('crumble');
+    for (let k = 0; k < 6; k++) Effects.debris(pr.cx + rand(-1, 1), lerp(pr.y0, pr.y1, k / 6), pr.cz + rand(-1, 1), [0.6, 0.48, 0.38], 10, 6);
+    Effects.dust(pr.cx, pr.y0 + 0.5, pr.cz, 20, 3);
+    Effects.shake(0.25);
+  },
+  onParry(b) {
+    Save.data.totals.parries++;
+    if (Save.data.totals.parries >= 10) Achievements.unlock('parry10', this);
+    Sound.play('parry'); Effects.sparks(b.pos[0], b.pos[1], b.pos[2], -b.vel[0] * 0.03, 0.3, -b.vel[2] * 0.03, 0.5, [1, 0.9, 0.6], 10, 6); },
+  onBlocked(e) {
+    const c = Enemies.center(e, this._c);
+    Effects.sparks(c[0] + Math.sin(e.yaw) * 0.7, c[1], c[2] + Math.cos(e.yaw) * 0.7, Math.sin(e.yaw), 0.3, Math.cos(e.yaw), 0.6, [1, 0.85, 0.5], 14, 7);
+    Effects.text(c[0], c[1] + 1.2, c[2], 'Blockerat', '#ffd27a', 14);
+    Sound.play('clang');
+  },
+  onEnemyAlert() {},
+  onEnemySeen(e) {
+    if (!Save.data.codex.seen[e.type]) { Save.data.codex.seen[e.type] = true; Save.save(); this.toast('Ny skiss i skissboken', ENEMY_DEFS[e.type].name); }
+    if (this.seenTypes[e.type] || !LIRRA.firstSeen[e.type]) return;
+    this.seenTypes[e.type] = true;
+    Spren.say(LIRRA.firstSeen[e.type], 5);
+  },
+  onEnemyWindup(e) { Spren.anticipation(e); },
+  onEnemyStrike() {},
+  onEnemyShoot(e) { this.sfx('arrow', e.pos); },
+  onThunderCharge(e) { Spren.anticipation(e); this.sfx('thunderCharge', e.pos); },
+  onBeam(e, x, y, z) {
+    this.sfx('redBolt', e.pos); Effects.sparks(x, y, z, 0, 1, 0, 1, [1, 0.3, 0.45], 14, 6); Effects.shake(0.12); },
+  onBruteSlam(e) {
+    this.sfx('bossSlam', e.pos); Effects.dust(e.pos[0], e.pos[1], e.pos[2], 24, 3); Effects.shake(0.4); },
+  onEnemyHit(e, dmg, source) {
+    Sound.play(e.def.plated || e.type === 'brute' || (e.boss && e.bossType === 'thunderclast') ? 'clang' : 'hit');
+    const c = Enemies.center(e, this._c);
+    Effects.burst(c[0], c[1], c[2], [0.9, 0.97, 1], 8, 5, 0.3, 0.06);
+    Effects.text(c[0], c[1] + e.h * 0.6, c[2], String(Math.round(dmg)), '#fff4d6', 15);
+  },
+  onDrawLight(o) {
+    Sound.play('draw'); Effects.burst(o.pos[0], o.pos[1], o.pos[2], GEMS[o.gem].c, 6, 1.5, 0.5, 0.05); },
+  onSphereTaken(o) { this.stats.wealth += o.value; Sound.play('sphere'); },
+  onItem(o) {
+    const p = this.player;
+    const c = p.center(this._c);
+    if (o.kind === 'gemheart') {
+      this.stats.gemhearts++;
+      Sound.play('gemheart');
+      Spren.glory = 6;
+      p.addLight(p.stats.maxLight);
+      Effects.burst(c[0], c[1], c[2], [0.4, 1, 0.65], 40, 6, 1, 0.12);
+      if ((this.stageBoss ? this.bossSpawned : this.goalGem) && !Bosses.boss && !this.complete) this.stageComplete();
+      else this.showBanner('Gemheart', 'Stormlight fyller dig', '#9dffc8', 2.5);
+    } else if (o.kind === 'knobweed') {
+      p.hp = Math.min(p.stats.maxHp, p.hp + 35);
+      Sound.play('heal');
+      Effects.text(c[0], c[1] + 1, c[2], '+35', '#9be37a', 18);
+    }
+  },
+  // Etappen klar: svär nästa Ideal och gå vidare.
+  stageComplete() {
+    this.complete = true;
+    this.goalGem = false;
+    Progression.wealth += this.stats.wealth + 25;
+    const ideal = this.stageBoss ? Progression.swearNext(this) : null;
+    this.lastIdeal = ideal;
+    Save.data.totals.gemhearts++;
+    Save.data.totals.wealthTotal = (Save.data.totals.wealthTotal || 0) + this.stats.wealth;
+    if (ideal && Progression.ideal >= 5) Achievements.unlock('ideal5', this);
+    const p = this.player;
+    const c = p.center(this._c);
+    if (ideal) {
+      Sound.play('ideal');
+      Spren.glory = 10;
+      this.showBanner(ideal.title + ': \u201d' + ideal.words + '\u201d', 'Orden accepteras. Nytt: ' + ideal.grants, '#bfe6ff', 6);
+      Effects.burst(c[0], c[1], c[2], [0.85, 0.95, 1], 120, 14, 1.5, 0.14);
+      Effects.shake(0.5);
+    } else this.showBanner('Etappen klar', 'Gemheart skördat', '#f0d890', 4);
+    this.completeTimer = 7;
+  },
+
+  onStormWarning() {
+    Sound.play('stormHorn');
+    Spren.say('Hör du hornen? Highstormen kommer – hitta lä!', 4); this.showBanner('Highstormen närmar sig!', 'Sök lä på klippornas västra sida', '#dbe7ff', 4); },
+  onStormStart() { Effects.shake(0.3); },
+  onStormEnd() {
+    if (this.player.alive && this.stats.stormTime > 0) Achievements.unlock('storm', this); this.showBanner('Stormen har passerat', 'Sfärerna glöder igen', '#f3e6c8', 3); },
+  onLightning() { Effects.shake(0.12); Sound.play('thunder', 0.8); },
+  onBossSpawn(e, def) {
+    if (!Save.data.codex.seen[e.bossType]) { Save.data.codex.seen[e.bossType] = true; Save.save(); }
+    Sound.play('bossSpawn'); this.showBanner(def.name, def.title, '#f0c070', 4); Effects.shake(0.5); },
+  onBossPhase(e) { Effects.shake(0.6); this.showBanner(BOSS_DEFS[e.bossType].name + ' rasar!', '', '#ff9a7a', 2); },
+  onBossWindup(e) { if (e.bossType !== 'herald') Spren.anticipation(e); },
+  onBossRoar(e) { Effects.shake(0.4); Sound.play('roar'); },
+  onBossEmerge(e) { Effects.shake(0.6); Effects.dust(e.pos[0], e.pos[1], e.pos[2], 40, 6); },
+  onBossBite() {},
+  onBossSlam() { Sound.play('bossSlam'); Pad.rumble(0.8, 260); },
+  onBossThrow() { Sound.play('swingHeavy'); },
+  onBossCurse() { Sound.play('thunderCharge'); },
+  onCursed(p) { const c = p.center(this._c); Effects.burst(c[0], c[1], c[2], [0.9, 0.3, 1], 30, 6, 0.8, 0.1); this.showBanner('Din gravitation har Lashats!', 'Tryck ' + (Pad.active ? 'vänster på styrkorset' : this.touch ? 'Åter' : 'Q') + ' för att ta tillbaka den', '#e0a0ff', 2); },
+  onLocked(key) { this.showBanner('Ej upplåst ännu', 'Svär fler Ideal för att låsa upp förmågan', '#d8c8a8', 1.6); },
+  onFullLashing(c, n) {
+    Sound.play('full'); Effects.burst(c[0], c[1] - 0.8, c[2], [0.85, 0.95, 1], 50, 12, 0.6, 0.12); Effects.shake(0.3); },
+  onLashEnemy(e) {
+    Sound.play('lash'); const c = Enemies.center(e, this._c); Effects.burst(c[0], c[1], c[2], [0.85, 0.95, 1], 24, 5, 0.5, 0.1); },
+  onSpear() { Sound.play('spear'); },
+  onWindCall(t) {
+    Sound.play('wind'); Effects.dust(t.x, t.y, t.z, 30, 4); },
+  onArmorHit(p) { const c = p.center(this._c); Effects.burst(c[0], c[1], c[2], [0.7, 0.85, 1], 16, 4, 0.4, 0.08); },
+  startEverstorm() { Storm.startEverstorm(); this.showBanner('Everstormen!', 'Sök lä på klippornas östra sida', '#ff7a7a', 3.5); },
+  onBossKilled(e) {
+    const ar = World.arena;
+    const z = Bosses.zones(e)[0];
+    for (let k = 0; k < 5; k++) Effects.burst(z[0] + rand(-3, 3), z[1] + rand(-2, 3), z[2] + rand(-3, 3), [1, 0.85, 0.6], 40, 10, 1.2, 0.18);
+    Effects.shake(1);
+    let gx = clamp(z[0], ar.cx - ar.radius * 0.6, ar.cx + ar.radius * 0.6), gz = clamp(z[2], ar.cz - ar.radius * 0.6, ar.cz + ar.radius * 0.6);
+    // Flytta in mot mitten tills platsen är fri från klippor.
+    for (let k = 0; k < 30 && World.insideAny(gx, ar.y1 + 0.6, gz); k++) { gx = lerp(gx, ar.cx, 0.15) + rand(-1, 1); gz = lerp(gz, ar.cz, 0.15) + rand(-1, 1); }
+    Pickups.spawnItem('gemheart', gx, ar.y1, gz, false);
+    for (let k = 0; k < 8; k++) Pickups.spawnSphere(gx + rand(-4, 4), ar.y1 + 1, gz + rand(-4, 4), randInt(0, 2), true, true);
+    Bosses.boss = null;
+    Storm.red = 0;
+    Sound.play('crumble');
+    Spren.glory = 8;
+    this.stats.bosses = (this.stats.bosses || 0) + 1;
+    this.showBanner(BOSS_DEFS[e.bossType].name + ' besegrad', 'Ta dess gemheart', '#f0d890', 4);
+  },
+  onEnemyKilled(e) {
+    Pickups.dropFromEnemy(e);
+    this.sfx('kill', e.pos);
+    const c = Enemies.center(e, this._c);
+    Effects.burst(c[0], c[1], c[2], [0.85, 0.95, 1], 26, 6, 0.8, 0.1);
+    Effects.debris(c[0], c[1], c[2], e.type === 'brute' ? [0.48, 0.4, 0.34] : [0.3, 0.22, 0.2], e.type === 'brute' ? 26 : 12, 5);
+  },
+};
+
+window.addEventListener('load', () => Game.init());
