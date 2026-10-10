@@ -12,9 +12,9 @@ const GEMS = [
   { name: 'ametist', c: [0.75, 0.45, 1] },
 ];
 const SPHERE_SIZES = [
-  { name: 'chip', light: 5, r: 0.07, value: 1 },
-  { name: 'mark', light: 12, r: 0.1, value: 5 },
-  { name: 'broam', light: 28, r: 0.14, value: 20 },
+  { name: 'chip', light: 12, r: 0.07, value: 1 },
+  { name: 'mark', light: 25, r: 0.1, value: 5 },
+  { name: 'broam', light: 50, r: 0.14, value: 20 },
 ];
 
 function createPickup() {
@@ -59,7 +59,7 @@ const Pickups = {
   },
 
   dropFromEnemy(e) {
-    let left = e.def.glow * (e.elite ? 3 : 1);
+    let left = e.def.glow * (e.elite ? 3 : 1) + 2;
     while (left > 0 && this.pool.count < 160) {
       const size = left >= 20 && Math.random() < 0.4 ? 2 : left >= 5 && Math.random() < 0.5 ? 1 : 0;
       this.spawnSphere(e.pos[0], e.pos[1] + e.h * 0.5, e.pos[2], size, true, true);

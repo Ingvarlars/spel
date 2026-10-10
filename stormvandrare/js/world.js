@@ -175,7 +175,7 @@ const World = {
     // Sfärer på klyftbotten.
     for (let k = 0; k < 18 + opts.level * 2; k++) {
       const x = rng() * L, z = (rng() - 0.5) * W;
-      if (!this.insideAny(x, CHASM_FLOOR + 1, z)) this.sphereSpots.push({ x, y: CHASM_FLOOR, z, dun: rng() < 0.5 });
+      if (!this.insideAny(x, CHASM_FLOOR + 1, z)) this.sphereSpots.push({ x, y: CHASM_FLOOR, z, dun: rng() < 0.25 });
     }
 
     this.buildMeshes(rng);
@@ -224,9 +224,9 @@ const World = {
       this.spawns.push({ type, x, y, z, elite, home: pl });
       if (type === 'crab' && rng() < 0.35) this.spawns.push({ type, x: x + rng() * 4, y, z: z + rng() * 4, home: pl });
     }
-    for (let k = 0; k < randInt2(rng, 1, 3); k++) {
+    for (let k = 0; k < randInt2(rng, 2, 4); k++) {
       const a = rng() * TAU, d = rng() * pl.radius * 0.75;
-      this.sphereSpots.push({ x: pl.cx + Math.cos(a) * d, y: pl.y1, z: pl.cz + Math.sin(a) * d, dun: rng() < 0.35 });
+      this.sphereSpots.push({ x: pl.cx + Math.cos(a) * d, y: pl.y1, z: pl.cz + Math.sin(a) * d, dun: rng() < 0.15 });
     }
     if (rng() < 0.3) {
       const a = rng() * TAU, d = rng() * pl.radius * 0.6;

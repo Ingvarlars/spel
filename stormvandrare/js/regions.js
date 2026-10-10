@@ -71,9 +71,9 @@ const LIRRA = {
     [34, 'Vänsterklicka för att hugga med din Shardblade. Tre hugg i rad blir ett kraftfullt avslut.',
       'Tryck Hugg för att svinga din Shardblade. Tre hugg i rad blir ett kraftfullt avslut.',
       'Tryck X eller RT för att hugga med din Shardblade. Tre hugg i rad blir ett kraftfullt avslut.'],
-    [46, 'Shift ger en rusning av Stormlight. Stormlight läker dig också – men det tar slut fort.',
-      'Rusa ger en rusning av Stormlight. Stormlight läker dig också – men det tar slut fort.',
-      'B ger en rusning av Stormlight. Stormlight läker dig också – men det tar slut fort.'],
+    [46, 'Shift ger en rusning av Stormlight. Stormlight läker dig också. Står du på marken fyller jag på lite åt dig.',
+      'Rusa ger en rusning av Stormlight. Stormlight läker dig också. Står du på marken fyller jag på lite åt dig.',
+      'B ger en rusning av Stormlight. Stormlight läker dig också. Står du på marken fyller jag på lite åt dig.'],
     [60, 'Målet ligger österut: den stora platån bortom de andra. Följ solen när den går upp!'],
   ],
   firstSeen: {

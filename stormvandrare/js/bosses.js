@@ -8,7 +8,7 @@ const CF_SCALE = 1.8; // chasmfiender är enorma
 const BOSS_DEFS = {
   chasmfiend: { name: 'Chasmfiend', title: 'Klyftornas härskare', hp: 2600, dmg: 26 },
   thunderclast: { name: 'Thunderclast', title: 'Det vandrande berget', hp: 3400, dmg: 30 },
-  heavenly: { name: 'Vev-Tarun', title: 'Himmelsk mästare bland Fused', hp: 2300, dmg: 22 },
+  heavenly: { name: 'Vev-Tarun', title: 'Himmelsk mästare bland Fused', hp: 1700, dmg: 18 },
   herald: { name: 'Everstormens härold', title: 'Den röda stormens röst', hp: 5200, dmg: 28 },
 };
 
@@ -113,7 +113,8 @@ const Bosses = {
         add(1.2, 1.6, 0, 1.2, 0.3); add(-1.2, 1.6, 0, 1.2, 0.3);
         break;
       case 'heavenly':
-        add(0, 1.2, 0, 1.3, 1);
+        // Efter dykningarna landar han utmattad och är lättare att träffa.
+        add(0, 1.2, 0, e.state === 'rest' ? 2.1 : 1.7, e.state === 'rest' ? 1.6 : 1);
         break;
       case 'herald':
         add(0, 7, 0, e.exposed > 0 ? 2.4 : 1.6, e.exposed > 0 ? 3 : 0.25);
@@ -150,7 +151,7 @@ const Bosses = {
     game.onBossPhase(e);
     if (e.bossType === 'chasmfiend') { e.state = 'submerge'; e.timer = 1.6; }
     if (e.bossType === 'heavenly') {
-      for (let k = 0; k < 2; k++) {
+      for (let k = 0; k < 1; k++) {
         const a = Enemies.spawn('hover', e.pos[0] + rand(-6, 6), e.pos[1], e.pos[2] + rand(-6, 6), game.mods, false, World.arena);
         a.alert = true;
       }
@@ -319,7 +320,7 @@ const Bosses = {
   heavenly(e, dt, game, p, def) {
     e.timer -= dt;
     const pc = p.center(this._t);
-    const fast = 1 + e.phase * 0.25;
+    const fast = 1 + e.phase * 0.15;
     e.yaw += clamp(angleDiff(Math.atan2(pc[0] - e.pos[0], pc[2] - e.pos[2]), e.yaw), -6 * dt, 6 * dt);
     const v = e.vel;
     const flyTo = (x, y, z, speed) => {
@@ -334,12 +335,12 @@ const Bosses = {
         break;
       case 'circle': {
         const a = e.anim * 0.7;
-        flyTo(pc[0] + Math.cos(a) * 11, pc[1] + 7 + Math.sin(e.anim * 1.7) * 2, pc[2] + Math.sin(a) * 11, 16 * fast);
+        flyTo(pc[0] + Math.cos(a) * 9, pc[1] + 4 + Math.sin(e.anim * 1.7) * 1.5, pc[2] + Math.sin(a) * 9, 10 * fast);
         if (e.timer <= 0) {
           const r = Math.random();
-          if (r < 0.4) { e.state = 'aim'; e.timer = 0.55 / fast; e.dives = 2 + e.phase; game.onBossWindup(e); }
-          else if (r < 0.75) { e.state = 'volley'; e.timer = 0.8; game.onBossWindup(e); }
-          else { e.state = 'curse'; e.timer = 1.2; game.onBossCurse(e); }
+          if (r < 0.5) { e.state = 'aim'; e.timer = 0.85 / fast; e.dives = 1 + e.phase; game.onBossWindup(e); }
+          else if (r < 0.82) { e.state = 'volley'; e.timer = 1.0; game.onBossWindup(e); }
+          else { e.state = 'curse'; e.timer = 1.4; game.onBossCurse(e); }
         }
         break;
       }
@@ -347,24 +348,33 @@ const Bosses = {
         V3.scale(v, v, Math.exp(-6 * dt));
         V3.set(e.aim, pc[0] - e.pos[0], pc[1] - e.pos[1], pc[2] - e.pos[2]);
         V3.normalize(e.aim, e.aim);
-        if (e.timer <= 0) { e.state = 'dive'; e.timer = 0.6; }
+        if (e.timer <= 0) { e.state = 'dive'; e.timer = 0.55; e.hitDone = false; }
         break;
       case 'dive':
-        V3.scale(v, e.aim, 34 * fast);
-        if (V3.dist(e.pos, pc) < 2) p.takeDamage(def.dmg, game, e.pos);
+        V3.scale(v, e.aim, 28 * fast);
+        if (!e.hitDone && V3.dist(e.pos, pc) < 2) { e.hitDone = true; p.takeDamage(def.dmg, game, e.pos); }
         if (e.timer <= 0) {
           e.dives--;
-          if (e.dives > 0) { e.state = 'aim'; e.timer = 0.35; }
-          else { e.state = 'circle'; e.timer = rand(2, 3); }
+          if (e.dives > 0) { e.state = 'aim'; e.timer = 0.6; }
+          else { e.state = 'rest'; e.timer = 3.2; game.showBanner('Vev-Tarun är utmattad!', 'Anfall nu', '#ffd9a0', 1.6); }
         }
         break;
+      case 'rest': {
+        // Sjunker ned till marken och hämtar andan – fönster för att anfalla.
+        const gy = World.groundBelow(e.pos[0], e.pos[1] + 1, e.pos[2]);
+        const ty = Math.max(gy, pc[1] - 3) + 0.2;
+        V3.scale(v, v, Math.exp(-5 * dt));
+        v[1] += (ty - e.pos[1]) * 3 * dt;
+        if (e.timer <= 0) { e.state = 'circle'; e.timer = rand(2.5, 3.5); }
+        break;
+      }
       case 'volley':
         V3.scale(v, v, Math.exp(-4 * dt));
         if (e.timer <= 0) {
           for (let k = -1; k <= 1; k++) {
             const tx = pc[0] + p.vel[0] * 0.5 + k * 2.5, ty = pc[1], tz = pc[2] + p.vel[2] * 0.5 + k * 2.5;
             const dx = tx - e.pos[0], dy = ty - e.pos[1], dz = tz - e.pos[2], d = Math.hypot(dx, dy, dz) || 1;
-            Projectiles.spawn('arrow', e.pos[0], e.pos[1] + 1.2, e.pos[2], dx / d * 38, dy / d * 38, dz / d * 38, def.dmg * 0.7, { parryable: true, r: 0.25, life: 4 });
+            Projectiles.spawn('arrow', e.pos[0], e.pos[1] + 1.2, e.pos[2], dx / d * 30, dy / d * 30, dz / d * 30, def.dmg * 0.5, { parryable: true, r: 0.25, life: 4 });
           }
           game.onEnemyShoot(e);
           e.state = 'circle'; e.timer = rand(1.5, 2.5);
@@ -378,9 +388,9 @@ const Bosses = {
           V3.normalize(dir, dir);
           V3.copy(p.g, dir);
           p.strength = 1; p.lashed = true;
-          this.curse = 2.2;
+          this.curse = 1.5;
           game.onCursed(p);
-          e.state = 'circle'; e.timer = rand(2, 3);
+          e.state = 'circle'; e.timer = rand(2.5, 3.5);
         }
         break;
     }
