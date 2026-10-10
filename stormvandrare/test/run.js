@@ -17,6 +17,8 @@ try { ({ chromium } = require('playwright')); } catch (e) { ({ chromium } = requ
   if (scenario.init) await page.addInitScript(scenario.init);
   await page.goto('file://' + path.resolve(__dirname, '..', 'index.html'));
   await page.waitForTimeout(500);
+  // Spelet startar i huvudmenyn; vanliga scenarier hoppar direkt in i en etapp.
+  if (!scenario.menu) await page.evaluate(() => { Game.menuWorld = false; Game.startStage(undefined, true); Game.play(); });
   try { await scenario.run(page, outDir); } catch (e) { errors.push('scenario: ' + e.stack); }
   console.log(errors.length ? 'FEL:\n' + errors.join('\n') : 'Inga konsolfel');
   await browser.close();

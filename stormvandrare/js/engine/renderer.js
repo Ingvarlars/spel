@@ -629,6 +629,11 @@ const Renderer = {
     const gl = this.gl;
     this.prepareLights();
     this.updateLightMatrix(focus);
+    if (this.shadowsOn === false) {
+      // Utan skuggor: flytta allt utanför skuggkartan så att inget blir skuggat.
+      M4.identity(this.lightViewProj);
+      this.lightViewProj[14] = 5;
+    }
 
     // 1. Skuggpass.
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.shadowFbo);
@@ -639,11 +644,12 @@ const Renderer = {
     gl.enable(gl.CULL_FACE);
     gl.cullFace(gl.BACK);
     gl.enable(gl.POLYGON_OFFSET_FILL);
+    const shadowItems = this.shadowsOn === false ? 0 : this.itemCount;
     gl.polygonOffset(2, 4);
     let prog = this.progShadow;
     gl.useProgram(prog.p);
     gl.uniformMatrix4fv(prog.u.u_lightViewProj, false, this.lightViewProj);
-    for (let i = 0; i < this.itemCount; i++) {
+    for (let i = 0; i < shadowItems; i++) {
       const it = this.items[i];
       if (!it.shadow || it.alpha < 1) continue;
       gl.uniformMatrix4fv(prog.u.u_model, false, it.model);
@@ -656,7 +662,7 @@ const Renderer = {
     gl.useProgram(prog.p);
     gl.uniformMatrix4fv(prog.u.u_lightViewProj, false, this.lightViewProj);
     for (const it of this.instItems) {
-      if (!it.shadow || it.grass) continue;
+      if (!it.shadow || it.grass || this.shadowsOn === false) continue;
       gl.bindVertexArray(it.mesh.vao);
       gl.drawArraysInstanced(gl.TRIANGLES, 0, it.mesh.count, it.mesh.instCount);
     }

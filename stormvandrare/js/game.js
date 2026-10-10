@@ -39,14 +39,170 @@ const Game = {
     window.addEventListener('resize', () => this.resize());
     this.resize();
     Input.init(this.glCanvas);
-    Input.wantLock = true;
+    UI.init();
+    Save.load();
+    this.applySettings();
     const unlock = () => Sound.unlock();
     window.addEventListener('keydown', unlock);
     window.addEventListener('pointerdown', unlock);
-    Input.on('mute', () => { Sound.muted = !Sound.muted; Sound.applyVolume(); });
-    this.env = this.makeEnv(THEMES.plains);
-    this.startStage();
+    Input.on('mute', () => { const s = Save.data.settings; s.muted = !s.muted; this.applySettings(); Save.save(); this.toast(s.muted ? 'Ljudet är avstängt' : 'Ljudet är på', 'Tryck M för att växla'); });
+    Input.on('pause', () => this.onPauseKey());
+    Input.on('unlock', () => { if (this.state === 'playing' && !this.touch) this.pause(); });
+    Input.on('blur', () => this.pause());
+    document.addEventListener('visibilitychange', () => { if (document.hidden) this.pause(); });
+    this.glCanvas.addEventListener('click', () => { if (this.state === 'playing') Input.requestLock(); });
+    // Ladda kampanjens framsteg och visa huvudmenyn med slätterna i bakgrunden.
+    const c = Save.data.campaign;
+    Campaign.region = clamp(c.region, 0, REGIONS.length - 1);
+    Campaign.stage = clamp(c.stage, 0, REGIONS[Campaign.region].stages.length - 1);
+    Progression.ideal = c.ideal;
+    Progression.wealth = Save.data.progress.wealth;
+    Progression.skills = Save.data.progress.skills;
+    this.showMenu();
     requestAnimationFrame((t) => { this.last = t; this.loop(t); });
+  },
+
+  // --- Inställningar ---
+  applySettings() {
+    const s = Save.data.settings;
+    Sound.volume = s.volume; Sound.musicVolume = s.music; Sound.sfxVolume = s.sfx; Sound.muted = s.muted;
+    Sound.applyVolume();
+    Input.sensitivity = 0.0023 * s.sensitivity;
+    Input.invertY = s.invertY;
+    Camera.fov = s.fov * Math.PI / 180 * 1.0;
+    Effects.settings.particles = s.particles;
+    Effects.settings.numbers = s.numbers;
+    Effects.settings.shake = s.shake;
+    Renderer.shadowsOn = s.shadows;
+    Renderer.bloomOn = s.bloom;
+    const scale = s.quality === 'low' ? 0.6 : s.quality === 'medium' ? 0.8 : 1;
+    if (scale !== this.renderScale) { this.renderScale = scale; this.resize(); }
+  },
+
+  toast(title, text) { UI.toast(title, text); },
+
+  // --- Skärmar ---
+  showMenu() {
+    this.setState('menu');
+    Input.releaseLock();
+    Campaign.endless = false;
+    // Bakgrund: en lugn vy över slätterna.
+    if (!this.menuWorld) {
+      const saved = { r: Campaign.region, s: Campaign.stage };
+      Campaign.region = 0; Campaign.stage = 1;
+      this.menuWorld = true;
+      this.startStage(4242, true);
+      Enemies.reset();
+      Campaign.region = saved.r; Campaign.stage = saved.s;
+    }
+    const hasSave = Save.data.campaign.started;
+    UI.menu({
+      continue: () => this.beginCampaign(false),
+      newGame: () => {
+        if (hasSave && !window.confirm('Börja en ny kampanj? Dina färdigheter i lägret behålls, men Idealen och platsen i kampanjen börjar om.')) return;
+        Save.data.campaign = { region: 0, stage: 0, ideal: 1, started: true, finished: false };
+        Campaign.region = 0; Campaign.stage = 0; Progression.ideal = 1;
+        Save.save();
+        this.beginCampaign(true);
+      },
+      endless: () => { Campaign.endless = true; Campaign.endlessDepth = 0; Progression.ideal = Math.max(1, Save.data.campaign.ideal); this.menuWorld = false; this.startStage(undefined); this.play(); },
+      camp: () => this.openCamp(() => this.showMenu()),
+      codex: () => this.openCodex(() => this.showMenu()),
+      settings: () => this.openSettings(() => this.showMenu()),
+      about: () => { UI.about({ back: () => this.showMenu() }); this.subBack = () => this.showMenu(); },
+    }, hasSave);
+  },
+
+  beginCampaign(fromStart) {
+    Campaign.endless = false;
+    Save.data.campaign.started = true;
+    this.menuWorld = false;
+    this.startStage(undefined, true);
+    if (Campaign.stage === 0 || fromStart) this.showIntro();
+    else this.play();
+  },
+
+  showIntro() {
+    const cfg = this.stageCfg;
+    this.setState('intro');
+    Input.releaseLock();
+    if (cfg.regionIndex !== undefined) this.note('region' + cfg.regionIndex);
+    UI.regionIntro(cfg.region, cfg.name, { start: () => this.play() });
+  },
+
+  play() {
+    UI.hide();
+    this.setState('playing');
+    this.acc = 0;
+    Input.clearQueue();
+    Input.wantLock = true;
+    Input.requestLock();
+  },
+
+  pause() {
+    if (this.state !== 'playing') return;
+    this.setState('paused');
+    Input.releaseLock();
+    this.showPause();
+  },
+
+  showPause() {
+    this.subBack = null;
+    UI.pause({
+      resume: () => this.play(),
+      codex: () => this.openCodex(() => this.showPause()),
+      settings: () => this.openSettings(() => this.showPause()),
+      restart: () => { this.startStage(this.stageSeed, true); this.play(); },
+      quit: () => { this.saveProgress(); this.menuWorld = false; this.showMenu(); },
+    });
+  },
+
+  onPauseKey() {
+    if (this.state === 'playing') this.pause();
+    else if (this.subBack) { const b = this.subBack; this.subBack = null; b(); }
+    else if (this.state === 'paused') this.play();
+  },
+
+  openCamp(back) {
+    this.subBack = back;
+    const actions = {
+      buy: (id) => { if (Progression.buy(id)) { Sound.play('gemheart'); this.saveProgress(); if (Progression.wealth >= 0 && Save.data.totals.wealthTotal >= 500) Achievements.unlock('rich', this); UI.camp(actions); } },
+      back: () => { this.subBack = null; back(); },
+    };
+    UI.camp(actions);
+  },
+
+  openCodex(back, tab) {
+    this.subBack = back;
+    UI.codex(tab, { tab: (t) => this.openCodex(back, t), back: () => { this.subBack = null; back(); } });
+  },
+
+  openSettings(back) {
+    this.subBack = back;
+    UI.settings({
+      change: () => { this.applySettings(); Save.save(); },
+      back: () => { this.subBack = null; Save.save(); back(); },
+      resetSave: () => { if (window.confirm('Radera all sparad progression (kampanj, färdigheter, skissbok och statistik)?')) { Save.reset(); Progression.ideal = 1; Progression.wealth = 0; Progression.skills = Save.data.progress.skills; Campaign.region = 0; Campaign.stage = 0; this.toast('Sparfilen raderad', ''); } },
+    });
+  },
+
+  // Sparar kampanjens läge, färdigheter och statistik.
+  saveProgress() {
+    const c = Save.data.campaign;
+    if (!Campaign.endless) { c.region = Campaign.region; c.stage = Campaign.stage; c.ideal = Progression.ideal; }
+    Save.data.progress.wealth = Progression.wealth;
+    Save.data.progress.skills = Progression.skills;
+    Save.save();
+  },
+
+  note(id) {
+    const n = Save.data.codex.notes;
+    if (n[id] || !CODEX_NOTES[id] && !id.startsWith('region')) return;
+    const key = id.startsWith('region') ? ['plains', 'chasms', 'frost', 'origin'][Number(id.slice(6))] : id;
+    if (!key || n[key]) return;
+    n[key] = true;
+    Save.save();
+    this.toast('Ny sida i skissboken', CODEX_NOTES[key].title);
   },
 
   setState(s) {
@@ -81,7 +237,7 @@ const Game = {
     };
   },
 
-  startStage(seed) {
+  startStage(seed, noPlay) {
     const cfg = this.stageCfg = Campaign.config();
     const level = this.level = cfg.level;
     this.stageBoss = cfg.boss;
@@ -93,6 +249,9 @@ const Game = {
     this.goalGem = false;
     this.seenTypes = this.seenTypes || {};
     seed = seed === undefined ? (Math.random() * 1e9) | 0 : seed;
+    this.stageSeed = seed;
+    this.deathTimer = 0;
+    this.showResults = 0;
     World.generate({ level, length: cfg.length, theme: cfg.theme }, seed);
     this.env = this.makeEnv(cfg.theme);
     if (Sound.ctx) Music.setKey(cfg.music[0], cfg.music[1]);
@@ -126,7 +285,8 @@ const Game = {
     V3.set(p.facing, 1, 0, 0);
     Camera.reset(V3.create(0, 1, 0), V3.create(1, 0, 0));
     Input.clearQueue();
-    this.setState('playing');
+    if (!noPlay) this.setState('playing');
+    if (!Campaign.endless && !this.menuWorld) this.saveProgress();
   },
 
   loop(t) {
@@ -148,8 +308,22 @@ const Game = {
       if (steps === 6) this.acc = 0;
       const look = Input.takeLook(frame);
       Camera.look(look.dx, look.dy);
+      Camera.update(frame, this.player.pos, V3.scale(this._c, this.player.g, -1), null);
+      Save.data.totals.time += frame;
+    } else if (this.state === 'menu' || this.state === 'intro') {
+      // Kameran svävar långsamt över banan.
+      const t = this.realTime * 0.04;
+      const st = World.start;
+      V3.set(Camera.pos, st.cx + 60 + Math.cos(t) * 90, 40 + Math.sin(t * 0.7) * 8, st.cz + Math.sin(t) * 90);
+      V3.set(Camera.fwd, -Math.cos(t), -0.28, -Math.sin(t));
+      V3.normalize(Camera.fwd, Camera.fwd);
+      V3.cross(Camera.right, Camera.fwd, [0, 1, 0]); V3.normalize(Camera.right, Camera.right);
+      V3.cross(Camera.up, Camera.right, Camera.fwd);
+      Camera.updateMatrices();
+      Effects.update(frame);
+    } else if (this.state !== 'loading') {
+      Camera.update(0, this.player.pos, V3.scale(this._c, this.player.g, -1), null);
     }
-    Camera.update(frame, this.player.pos, V3.scale(this._c, this.player.g, -1), null);
     this.render();
     requestAnimationFrame((tt) => this.loop(tt));
   },
@@ -184,7 +358,11 @@ const Game = {
     }
     if (this.completeTimer > 0) {
       this.completeTimer -= dt;
-      if (this.completeTimer <= 0) this.nextStage();
+      if (this.completeTimer <= 0) this.showComplete();
+    }
+    if (this.deathTimer > 0) {
+      this.deathTimer -= dt;
+      if (this.deathTimer <= 0) this.showGameOver();
     }
     // Lirras handledning i första etappen.
     if (this.stageCfg.tutorial && this.tutorialIdx < LIRRA.tutorial.length && this.time - this.stageStart >= LIRRA.tutorial[this.tutorialIdx][0]) {
@@ -214,9 +392,48 @@ const Game = {
 
   nextStage() {
     const newRegion = Campaign.advance();
-    if (Campaign.finished) { this.showBanner('Stormen har tystnat', 'Du har besegrat Everstormens härold. Tack för att du spelade!', '#f0d890', 10); Campaign.finished = false; Campaign.region = 0; Campaign.stage = 0; }
-    this.startStage();
-    if (newRegion) Spren.say(this.stageCfg.region.intro[0], 8);
+    if (Campaign.endless) {
+      Save.data.best.endless = Math.max(Save.data.best.endless, Campaign.endlessDepth + 1);
+      if (Campaign.endlessDepth >= 4) Achievements.unlock('endless5', this);
+    }
+    if (Campaign.finished) {
+      Save.data.campaign.finished = true;
+      Campaign.finished = false; Campaign.region = 0; Campaign.stage = 0;
+      this.saveProgress();
+      this.toast('Kampanjen klar!', 'Everstormens härold är besegrad. Tack för att du spelade!');
+      this.menuWorld = false;
+      this.showMenu();
+      return;
+    }
+    this.startStage(undefined, true);
+    if (newRegion || Campaign.stage === 0) this.showIntro(); else this.play();
+  },
+
+  showComplete(again) {
+    this.setState('complete');
+    Input.releaseLock();
+    if (!again) { Save.data.totals.stages++; this.saveProgress(); }
+    UI.complete(this.stageCfg, this.stats, this.time, this.lastIdeal, {
+      next: () => this.nextStage(),
+      camp: () => this.openCamp(() => this.showComplete(true)),
+      menu: () => { Campaign.advance(); this.saveProgress(); this.menuWorld = false; this.showMenu(); },
+    });
+  },
+
+  showGameOver(again) {
+    this.setState('gameover');
+    Input.releaseLock();
+    if (!again) {
+      Save.data.totals.deaths++;
+      // Hälften av sfärerna från etappen följer med till lägret.
+      Progression.wealth += Math.floor(this.stats.wealth / 2);
+      this.saveProgress();
+    }
+    UI.gameOver(this.stageCfg, this.stats, this.time, {
+      retry: () => { this.startStage(this.stageSeed, true); this.play(); },
+      camp: () => this.openCamp(() => this.showGameOver(true)),
+      menu: () => { this.menuWorld = false; this.showMenu(); },
+    });
   },
 
   // Väder: damm, sporer, snö eller aska runt kameran.
@@ -313,6 +530,7 @@ const Game = {
       return 0;
     }
     e.hp -= dmg;
+    e.lastHitSource = source;
     e.flash = 0.08;
     e.alert = true;
     if (dir && knock) {
@@ -330,6 +548,9 @@ const Game = {
   killEnemy(e) {
     e.dead = true;
     this.stats.kills++;
+    Save.data.totals.kills++;
+    if (e.lastHitSource === 'fall') Achievements.unlock('fallKill', this);
+    if (e.boss) { Save.data.totals.bosses++; Achievements.unlock(e.bossType, this); }
     if (e.boss) { this.onBossKilled(e); return; }
     this.onEnemyKilled(e);
   },
@@ -355,6 +576,7 @@ const Game = {
     const env = this.env;
     env.retract[0] = p.pos[0]; env.retract[1] = p.pos[1]; env.retract[2] = p.pos[2];
     Storm.applyEnv(env, env.base);
+    env.bloom = Renderer.bloomOn === false ? 0 : 0.9;
     // Röd blixt vid skada och puls när livet är lågt.
     if (this.hurtFlash > 0) this.hurtFlash -= this.frameDt || 0.016;
     const low = p.alive && p.hp < p.stats.maxHp * 0.25 ? 0.12 + 0.08 * Math.sin(this.realTime * 6) : 0;
@@ -369,7 +591,7 @@ const Game = {
     Spren.draw(this);
     Enemies.draw(this);
     Projectiles.draw(this);
-    p.draw(this);
+    if (this.state !== 'menu' && this.state !== 'intro') p.draw(this);
     Blade.draw();
     Effects.draw();
     // Stormlight lyser upp omgivningen.
@@ -386,6 +608,8 @@ const Game = {
     const ctx = this.hctx, w = this.w, h = this.h, p = this.player;
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
+    if (this.state !== 'playing' && this.state !== 'paused') return;
+    document.getElementById('lockhint').classList.toggle('show', !Input.locked && !this.touch && this.state === 'playing');
     // Sikte.
     ctx.strokeStyle = 'rgba(235,245,255,0.8)';
     ctx.lineWidth = 1.5;
@@ -415,7 +639,7 @@ const Game = {
     ctx.fillStyle = '#fff';
     ctx.font = '12px Georgia';
     ctx.textAlign = 'left';
-    ctx.fillText(Math.round(this.fps) + ' fps', 16, h - 16);
+    if (Save.data.settings.showFps) ctx.fillText(Math.round(this.fps) + ' fps', 16, h - 16);
     // Livmätare över skadade fiender.
     const o = this._p2;
     for (const e of Enemies.list) {
@@ -488,7 +712,7 @@ const Game = {
       ctx.fillStyle = p.inShelter ? '#bfe6ff' : '#ffb0a0';
       ctx.fillText(Storm.contains(p.pos[0]) ? (p.inShelter ? 'I lä – Stormlight fyller dig' : 'Utsatt för stormen!') : 'Highstormen drar fram', 20, 72);
     }
-    const b = this.banner;
+    const b = this.state === 'playing' ? this.banner : null;
     if (b) {
       ctx.globalAlpha = Math.min(1, (b.max - b.t) * 3, b.t * 1.5);
       ctx.textAlign = 'center';
@@ -506,6 +730,8 @@ const Game = {
 
   // --- Händelser (fylls på i senare steg) ---
   onLash(p, more) {
+    Achievements.unlock('firstLash', this);
+    if (p.strength >= 3) Achievements.unlock('tripleLash', this);
     Sound.play(more ? 'lashMore' : 'lash');
     const c = p.center(this._c);
     Effects.burst(c[0], c[1], c[2], [0.85, 0.95, 1], 18, 5, 0.5, 0.1);
@@ -520,6 +746,7 @@ const Game = {
   },
   onJump() { Sound.play('jump'); },
   onSlam(p, speed) {
+    if (speed > 45) Achievements.unlock('slam', this);
     p.landT = Math.min(1, speed / 40);
     Sound.play(speed > 40 ? 'slam' : 'land');
     Effects.dust(p.pos[0], p.pos[1], p.pos[2], 16, 2.5);
@@ -540,21 +767,31 @@ const Game = {
     const c = p.center(this._c);
     Effects.burst(c[0], c[1], c[2], [1, 0.45, 0.3], 10, 4, 0.5, 0.08, { add: false, grav: 6 });
     Effects.shake(0.3);
-    this.stats.taken += dmg;
+    this.stats.taken += Math.min(dmg, p.stats.maxHp);
     Sound.play('hurt');
     Spren.painspren(p.pos[0], p.pos[1], p.pos[2]);
     this.hurtFlash = 0.5;
   },
-  onPlayerDeath() {},
+  onPlayerDeath(p) {
+    this.deathTimer = 2.2;
+    const c = p.center(this._c);
+    Effects.burst(c[0], c[1], c[2], [0.85, 0.95, 1], 80, 8, 1.6, 0.12);
+    Sound.play('crumble');
+    Spren.say('Nej… res dig!', 2);
+  },
   onSwing(sw) { Sound.play(sw.combo === 2 ? 'swingHeavy' : 'swing'); },
   onCarveHit(pr, x, y, z) { Effects.debris(x, y, z, [0.62, 0.5, 0.4], 6, 4); Effects.shake(0.05); },
   onCarve(pr) {
+    Save.data.totals.carved++;
+    Achievements.unlock('carve', this);
     Sound.play('crumble');
     for (let k = 0; k < 6; k++) Effects.debris(pr.cx + rand(-1, 1), lerp(pr.y0, pr.y1, k / 6), pr.cz + rand(-1, 1), [0.6, 0.48, 0.38], 10, 6);
     Effects.dust(pr.cx, pr.y0 + 0.5, pr.cz, 20, 3);
     Effects.shake(0.25);
   },
   onParry(b) {
+    Save.data.totals.parries++;
+    if (Save.data.totals.parries >= 10) Achievements.unlock('parry10', this);
     Sound.play('parry'); Effects.sparks(b.pos[0], b.pos[1], b.pos[2], -b.vel[0] * 0.03, 0.3, -b.vel[2] * 0.03, 0.5, [1, 0.9, 0.6], 10, 6); },
   onBlocked(e) {
     const c = Enemies.center(e, this._c);
@@ -564,6 +801,7 @@ const Game = {
   },
   onEnemyAlert() {},
   onEnemySeen(e) {
+    if (!Save.data.codex.seen[e.type]) { Save.data.codex.seen[e.type] = true; Save.save(); this.toast('Ny skiss i skissboken', ENEMY_DEFS[e.type].name); }
     if (this.seenTypes[e.type] || !LIRRA.firstSeen[e.type]) return;
     this.seenTypes[e.type] = true;
     Spren.say(LIRRA.firstSeen[e.type], 5);
@@ -608,6 +846,10 @@ const Game = {
     this.goalGem = false;
     Progression.wealth += this.stats.wealth + 25;
     const ideal = this.stageBoss ? Progression.swearNext(this) : null;
+    this.lastIdeal = ideal;
+    Save.data.totals.gemhearts++;
+    Save.data.totals.wealthTotal = (Save.data.totals.wealthTotal || 0) + this.stats.wealth;
+    if (ideal && Progression.ideal >= 5) Achievements.unlock('ideal5', this);
     const p = this.player;
     const c = p.center(this._c);
     if (ideal) {
@@ -624,9 +866,11 @@ const Game = {
     Sound.play('stormHorn');
     Spren.say('Hör du hornen? Highstormen kommer – hitta lä!', 4); this.showBanner('Highstormen närmar sig!', 'Sök lä på klippornas västra sida', '#dbe7ff', 4); },
   onStormStart() { Effects.shake(0.3); },
-  onStormEnd() { this.showBanner('Stormen har passerat', 'Sfärerna glöder igen', '#f3e6c8', 3); },
+  onStormEnd() {
+    if (this.player.alive && this.stats.stormTime > 0) Achievements.unlock('storm', this); this.showBanner('Stormen har passerat', 'Sfärerna glöder igen', '#f3e6c8', 3); },
   onLightning() { Effects.shake(0.12); Sound.play('thunder', 0.8); },
   onBossSpawn(e, def) {
+    if (!Save.data.codex.seen[e.bossType]) { Save.data.codex.seen[e.bossType] = true; Save.save(); }
     Sound.play('bossSpawn'); this.showBanner(def.name, def.title, '#f0c070', 4); Effects.shake(0.5); },
   onBossPhase(e) { Effects.shake(0.6); this.showBanner(BOSS_DEFS[e.bossType].name + ' rasar!', '', '#ff9a7a', 2); },
   onBossWindup(e) { if (e.bossType !== 'herald') Spren.anticipation(e); },

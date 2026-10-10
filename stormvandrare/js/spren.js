@@ -30,6 +30,7 @@ const Spren = {
     const speed = V3.len(p.vel);
     // Windspren dyker upp vid hög fart.
     const want = speed > 12 ? Math.min(5, Math.floor(speed / 8)) : 0;
+    if (want && !this._noted) { this._noted = true; game.note('windspren'); }
     if (this.wind.length < want && Math.random() < dt * 6) {
       this.wind.push({ pts: [], phase: rand(0, TAU), life: rand(3, 6), max: 6, r: rand(1, 2.2), h: rand(-0.6, 0.8), spin: rand(2, 4) * (Math.random() < 0.5 ? -1 : 1) });
     }
@@ -56,7 +57,7 @@ const Spren = {
     L.trail.unshift([L.pos[0], L.pos[1], L.pos[2]]);
     if (L.trail.length > 12) L.trail.length = 12;
     if (L.speechT > 0) { L.speechT -= dt; if (L.speechT <= 0) L.speech = null; }
-    if (this.glory > 0) this.glory -= dt;
+    if (this.glory > 0) { this.glory -= dt; if (!this._gNoted) { this._gNoted = true; game.note('gloryspren'); } }
     for (let i = this.anticip.length - 1; i >= 0; i--) {
       this.anticip[i].life -= dt;
       if (this.anticip[i].life <= 0 || this.anticip[i].e.dead) this.anticip.splice(i, 1);

@@ -96,8 +96,14 @@ F = Lasha fiende, G/mittenklick = spjut, C = vindkallelse, piltangenter = kamera
       klyftbotten, svävande öar). Etapper utan boss slutar med väktare och en
       gemheart. Färdighetsträd `SKILLS` + `Progression.wealth/skills/buy` (ännu
       utan UI – kommer i steg 7). Väder: damm, sporer, snö, aska.
-- [ ] Steg 7: menyer i skissboksstil, bestiarie med skisser, sparning
-      (localStorage, tysta fel), prestationer.
+- [x] Steg 7: `js/storage.js` (sparfil i localStorage, tysta fel), `js/ui.js`
+      (huvudmeny med svävande kamera, regionintro med karta, paus, etapp klar,
+      game over, lägret, inställningar, om spelet), `js/codex.js` (bestiarie,
+      anteckningar, 14 prestationer) och `js/sketch.js` (bläckteckningar av
+      varelserna). Spelet startar i huvudmenyn; `test/run.js` hoppar direkt in i
+      en etapp om scenariot inte sätter `module.exports.menu = true`.
+      `test/menu.js` går igenom alla skärmar och kontrollerar sparningen,
+      `test/codex.js` visar skisserna.
 - [ ] Steg 8: mobil (joystick, kamera-drag, knappar) och handkontroll (Gamepad API).
 - [ ] Steg 9: balans (just nu för många kremlingar per platå), prestanda,
       länk från startsidan `index.html`, README (hur man spelar), PR mot `main`.
